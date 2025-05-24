@@ -48,6 +48,7 @@ def _parse_npz_to_pyg_data(npz_file_path: str, dataset_name: str):
     logger.info(f"Loading '{dataset_name}' from NPZ: {npz_file_path}")
     try:
         npz_data = np.load(npz_file_path, allow_pickle=True)
+        logger.info(f"NPZ file keys: {npz_data.files}")
     except Exception as e:
         logger.error(f"Failed to load NPZ file '{npz_file_path}': {e}")
         raise
@@ -56,48 +57,24 @@ def _parse_npz_to_pyg_data(npz_file_path: str, dataset_name: str):
     if 'node_attr' not in npz_data:
         raise ValueError(f"'node_attr' key missing in {npz_file_path}")
     node_attr_raw = npz_data['node_attr']
-    x = None
-
-    if sp.issparse(node_attr_raw):
-        logger.info(f"Node attributes are sparse. Converting to dense array.")
+    logger.info(f"Node attributes shape/type: {node_attr_raw.shape if hasattr(node_attr_raw, 'shape') else type(node_attr_raw)}")
+    
+    # Handle node attributes
+    if isinstance(node_attr_raw, np.ndarray) and node_attr_raw.dtype == np.dtype('O'):
+        if node_attr_raw.size == 1 and sp.issparse(node_attr_raw.flat[0]):
+            x = torch.FloatTensor(node_attr_raw.flat[0].toarray())
+        else:
+            raise ValueError(f"Unexpected node_attr format in {npz_file_path}")
+    elif sp.issparse(node_attr_raw):
         x = torch.FloatTensor(node_attr_raw.toarray())
-    elif isinstance(node_attr_raw, np.ndarray):
-        if node_attr_raw.dtype != np.dtype('O'): # Standard numeric array
-            x = torch.FloatTensor(node_attr_raw.astype(np.float32))
-        else: # Object array - handle common cases
-            if node_attr_raw.size == 0:
-                raise ValueError(f"'node_attr' object array in '{npz_file_path}' is empty.")
-            
-            # Case: array of sparse items (features for individual nodes)
-            if all(m is None or sp.issparse(m) for m in node_attr_raw.flat):
-                logger.debug(f"'{dataset_name}': 'node_attr' is array of sparse items.")
-                processed_features = []
-                for item in node_attr_raw.flat:
-                    if item is None: continue
-                    dense_item = item.toarray()
-                    processed_features.append(dense_item.flatten())
-                if not processed_features:
-                     raise ValueError(f"No valid features from 'node_attr' (array of sparse items) in '{npz_file_path}'.")
-                x = _normalize_features_if_needed(processed_features, dataset_name)
-            # Case: array of ndarrays (e.g. list of feature vectors)
-            elif all(m is None or isinstance(m, np.ndarray) for m in node_attr_raw.flat):
-                logger.debug(f"'{dataset_name}': 'node_attr' is array of ndarrays.")
-                processed_features = [item for item in node_attr_raw.flat if item is not None]
-                if not processed_features:
-                     raise ValueError(f"No valid features from 'node_attr' (array of ndarrays) in '{npz_file_path}'.")
-                x = _normalize_features_if_needed(processed_features, dataset_name)
-            else:
-                raise ValueError(f"Unhandled object array structure for 'node_attr' in {npz_file_path}. First element type: {type(node_attr_raw.flat[0]) if node_attr_raw.size > 0 else 'N/A'}")
     else:
         raise ValueError(f"Unexpected type for 'node_attr': {type(node_attr_raw)} in {npz_file_path}")
-    
-    if x is None:
-        raise ValueError(f"Failed to process 'node_attr' in {npz_file_path}")
 
     # 2. Node Labels ('node_label')
     if 'node_label' not in npz_data:
         raise ValueError(f"'node_label' key missing in {npz_file_path}")
     node_label_raw = npz_data['node_label']
+    logger.info(f"Node labels shape/type: {node_label_raw.shape if hasattr(node_label_raw, 'shape') else type(node_label_raw)}")
     
     if isinstance(node_label_raw, np.ndarray):
         logger.info(f"Node labels are numpy array. Converting to long tensor.")
@@ -113,23 +90,22 @@ def _parse_npz_to_pyg_data(npz_file_path: str, dataset_name: str):
     if 'adj_matrix' not in npz_data:
         raise ValueError(f"'adj_matrix' key missing in {npz_file_path}")
     adj_raw = npz_data['adj_matrix']
-    logger.info(f"Adjacency matrix is {adj_raw}")
-    adj_processed = adj_raw
-    # Handle common case of sparse matrix wrapped in 0-d or 1-element object array
+    logger.info(f"Adjacency matrix shape/type: {adj_raw.shape if hasattr(adj_raw, 'shape') else type(adj_raw)}")
+    
+    # Handle adjacency matrix
     if isinstance(adj_raw, np.ndarray) and adj_raw.dtype == np.dtype('O'):
-        if adj_raw.ndim == 0 and sp.issparse(adj_raw.item()):
-            adj_processed = adj_raw.item()
-        elif adj_raw.size == 1 and sp.issparse(adj_raw.flat[0]):
+        if adj_raw.size == 1 and sp.issparse(adj_raw.flat[0]):
             adj_processed = adj_raw.flat[0]
-
-    if sp.issparse(adj_processed):
-        adj_coo = adj_processed.tocoo()
-        edge_index = torch.LongTensor(np.vstack((adj_coo.row, adj_coo.col)))
-    elif isinstance(adj_processed, np.ndarray) and adj_processed.ndim == 2: # Dense adj
-        rows, cols = adj_processed.nonzero()
-        edge_index = torch.LongTensor(np.vstack((rows, cols)))
+        else:
+            raise ValueError(f"Unexpected adj_matrix format in {npz_file_path}")
+    elif sp.issparse(adj_raw):
+        adj_processed = adj_raw
     else:
-        raise ValueError(f"Unexpected type/structure for 'adj_matrix': {type(adj_processed)} in {npz_file_path}")
+        raise ValueError(f"Unexpected type for 'adj_matrix': {type(adj_raw)} in {npz_file_path}")
+
+    # Convert to edge index
+    adj_coo = adj_processed.tocoo()
+    edge_index = torch.LongTensor(np.vstack((adj_coo.row, adj_coo.col)))
 
     # Create PyG Data object
     data = Data(x=x, edge_index=edge_index, y=y)
