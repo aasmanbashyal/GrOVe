@@ -1,0 +1,29 @@
+services:
+  app:
+    build: . # Build the image from the Dockerfile in the current directory
+    volumes:
+      - ./:/app       
+      - ./data:/app/data 
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OMP_NUM_THREADS=16 
+      - TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;8.9+PTX"
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all 
+              capabilities: [gpu]
+          memory: 4G   
+        limits:
+          memory: 12G   
+
+    networks:
+      - grove-network 
+    command: bash scripts/startup.sh # Command to run on start
+
+networks:
+  grove-network:
+    driver: bridge
