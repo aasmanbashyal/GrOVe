@@ -31,6 +31,22 @@ class BaseGNNModel(nn.Module):
         self.out_feats = out_feats
         self.dropout = dropout
         self.name = name or self.__class__.__name__
+        
+        # Initialize weights after model creation
+        self.apply(self._init_weights)
+    
+    def _init_weights(self, module):
+        """
+        Initialize the weights of the model using Kaiming initialization.
+        This provides better initialization for deep networks.
+        """
+        if isinstance(module, nn.Linear):
+            nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0)
+        elif isinstance(module, nn.BatchNorm1d):
+            nn.init.constant_(module.weight, 1)
+            nn.init.constant_(module.bias, 0)
     
     def forward(self, data):
         """
@@ -100,7 +116,7 @@ class GATModel(BaseGNNModel):
     Graph Attention Network model.
     """
     
-    def __init__(self, in_feats, h_feats, out_feats, num_heads=4, dropout=0.5, name=None):
+    def __init__(self, in_feats, h_feats, out_feats, num_heads=4, num_layers=3, dropout=0.5, name=None):
         """
         Initialize the GAT model.
         
@@ -109,11 +125,13 @@ class GATModel(BaseGNNModel):
             h_feats: Hidden feature dimension
             out_feats: Output feature dimension
             num_heads: Number of attention heads
+            num_layers: Number of GAT layers
             dropout: Dropout probability
             name: Name of the model
         """
         super(GATModel, self).__init__(in_feats, h_feats, out_feats, dropout, name)
         self.num_heads = num_heads
+        self.num_layers = num_layers
         
         # Multi-head attention layers
         self.gat1 = GATConv(
@@ -141,7 +159,7 @@ class GATModel(BaseGNNModel):
         """
         x, edge_index = data.x, data.edge_index
         
-        # Sample neighbors for each layer
+        # Sample neighbors for each layer, fixed at 10 as per paper
         edge_index1 = self._sample_neighbors(edge_index, 10)
         edge_index2 = self._sample_neighbors(edge_index, 10)
         edge_index3 = self._sample_neighbors(edge_index, 10)
@@ -156,11 +174,10 @@ class GATModel(BaseGNNModel):
         h = F.relu(h)
         h = F.dropout(h, p=self.dropout, training=self.training)
         
-        # Third GAT layer
-        h = self.gat3(h, edge_index3)
-        
         # Store embeddings
         embeddings = h
+        # Third GAT layer
+        h = self.gat3(h, edge_index3)
         
         # Apply softmax for classification
         predictions = F.log_softmax(h, dim=1)
@@ -220,7 +237,7 @@ class GINModel(BaseGNNModel):
     Graph Isomorphism Network model.
     """
     
-    def __init__(self, in_feats, h_feats, out_feats, dropout=0.5, name=None):
+    def __init__(self, in_feats, h_feats, out_feats, num_layers=3, dropout=0.5, name=None):
         """
         Initialize the GIN model.
         
@@ -228,10 +245,12 @@ class GINModel(BaseGNNModel):
             in_feats: Input feature dimension
             h_feats: Hidden feature dimension
             out_feats: Output feature dimension
+            num_layers: Number of GIN layers (default: 3 as per paper)
             dropout: Dropout probability
             name: Name of the model
         """
         super(GINModel, self).__init__(in_feats, h_feats, out_feats, dropout, name)
+        self.num_layers = num_layers
         
         # MLP for each GIN layer
         self.mlp1 = nn.Sequential(
@@ -269,7 +288,7 @@ class GINModel(BaseGNNModel):
         """
         x, edge_index = data.x, data.edge_index
         
-        # Sample neighbors for each layer
+        # Sample neighbors for each layer, fixed at 10 as per paper
         edge_index1 = self._sample_neighbors(edge_index, 10)
         edge_index2 = self._sample_neighbors(edge_index, 10)
         edge_index3 = self._sample_neighbors(edge_index, 10)
@@ -284,11 +303,10 @@ class GINModel(BaseGNNModel):
         h = F.relu(h)
         h = F.dropout(h, p=self.dropout, training=self.training)
         
+        # Store embeddings 
+        embeddings = h
         # Third GIN layer
         h = self.gin3(h, edge_index3)
-        
-        # Store embeddings (before softmax)
-        embeddings = h
         
         # Apply softmax for classification
         predictions = F.log_softmax(h, dim=1)
@@ -348,7 +366,7 @@ class GraphSAGEModel(BaseGNNModel):
     GraphSAGE model.
     """
     
-    def __init__(self, in_feats, h_feats, out_feats, dropout=0.5, aggregator_type='mean', name=None):
+    def __init__(self, in_feats, h_feats, out_feats, num_layers=2, dropout=0.5, aggregator_type='mean', name=None):
         """
         Initialize the GraphSAGE model.
         
@@ -356,14 +374,16 @@ class GraphSAGEModel(BaseGNNModel):
             in_feats: Input feature dimension
             h_feats: Hidden feature dimension
             out_feats: Output feature dimension
-            dropout: Dropout probability
-            aggregator_type: Aggregator type ('mean', 'gcn', 'pool', 'lstm')
+            num_layers: Number of GraphSAGE layers (default: 2 as per paper)
+            dropout: Dropout probability (default: 0.5 as per paper)
+            aggregator_type: Aggregator type (default: 'mean' as per paper)
             name: Name of the model
         """
         super(GraphSAGEModel, self).__init__(in_feats, h_feats, out_feats, dropout, name)
+        self.num_layers = num_layers
         self.aggregator_type = aggregator_type
         
-        # GraphSAGE layers
+        # GraphSAGE layers - 2-layer model as per paper
         self.sage1 = SAGEConv(in_feats, h_feats, normalize=True, aggr=aggregator_type)
         self.sage2 = SAGEConv(h_feats, out_feats, normalize=True, aggr=aggregator_type)
     
@@ -379,21 +399,20 @@ class GraphSAGEModel(BaseGNNModel):
         """
         x, edge_index = data.x, data.edge_index
         
-        # Sample neighbors for each layer
-        edge_index1 = self._sample_neighbors(edge_index, 25)  # First layer: 25 neighbors
-        edge_index2 = self._sample_neighbors(edge_index, 10)  # Second layer: 10 neighbors
+        # Sample neighbors for each layer with sizes specified in the paper
+        edge_index1 = self._sample_neighbors(edge_index, 25)  # First layer: 25 neighbors as per paper
+        edge_index2 = self._sample_neighbors(edge_index, 10)  # Second layer: 10 neighbors as per paper
         
         # First GraphSAGE layer
         h = self.sage1(x, edge_index1)
         h = F.relu(h)
         h = F.dropout(h, p=self.dropout, training=self.training)
         
+
         # Second GraphSAGE layer
         h = self.sage2(h, edge_index2)
-        
-        # Store embeddings (before softmax)
+        # Store embeddings 
         embeddings = h
-        
         # Apply softmax for classification
         predictions = F.log_softmax(h, dim=1)
         
@@ -446,5 +465,65 @@ class GraphSAGEModel(BaseGNNModel):
         
         # Trim the tensor to actual size
         return new_edges[:, :edge_count]
+
+class GNNModel(BaseGNNModel):
+    """
+    GNN model.
+    """
+    def __init__(self, model_type, in_feats, h_feats, out_feats, num_features=None, num_classes=None, dropout=0.5, num_heads=4, num_layers=None, name=None):
+        """
+        Initialize the GNN model.
+        
+        Args:
+            model_type: Type of GNN architecture ('gat', 'gin', or 'sage')
+            in_feats: Input feature dimension (can use num_features instead)
+            h_feats: Hidden feature dimension
+            out_feats: Output feature dimension (can use num_classes instead)
+            num_features: Alternative to in_feats (for compatibility)
+            num_classes: Alternative to out_feats (for compatibility)
+            dropout: Dropout probability
+            num_heads: Number of attention heads for GAT
+            num_layers: Number of layers for the model (if None, uses defaults: 3 for GAT/GIN, 2 for SAGE)
+            name: Name of the model
+        """
+        # Allow both naming conventions for compatibility
+        in_feats = in_feats or num_features
+        out_feats = out_feats or num_classes
+        
+        if in_feats is None or out_feats is None:
+            raise ValueError("Either (in_feats, out_feats) or (num_features, num_classes) must be provided")
+            
+        super(GNNModel, self).__init__(in_feats, h_feats, out_feats, dropout, name)
+        
+        self.model_type = model_type.lower()
+        
+        # Set default num_layers based on model type (as per paper)
+        if num_layers is None:
+            if self.model_type in ['gat', 'gin']:
+                num_layers = 3
+            elif self.model_type == 'sage':
+                num_layers = 2
+        
+        # Initialize the appropriate model based on model_type
+        if self.model_type == 'gat':
+            self.model = GATModel(in_feats, h_feats, out_feats, num_heads=num_heads, num_layers=num_layers, dropout=dropout, name=name)
+        elif self.model_type == 'gin':
+            self.model = GINModel(in_feats, h_feats, out_feats, num_layers=num_layers, dropout=dropout, name=name)
+        elif self.model_type == 'sage':
+            self.model = GraphSAGEModel(in_feats, h_feats, out_feats, num_layers=num_layers, dropout=dropout, name=name)
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
+    
+    def forward(self, data):
+        """
+        Forward pass.
+        
+        Args:
+            data: PyTorch Geometric data object
+            
+        Returns:
+            Node embeddings and predictions
+        """
+        return self.model(data)
 
 
