@@ -120,11 +120,22 @@ class GraphDataProcessor:
                                       node_mapping[new_edge_index[1, i].item()]]
                                      for i in range(new_edge_index.size(1))]).t()
         
+        # Handle node features and labels
+        x = graph.x[node_indices]
+        y = None
+        
+        if hasattr(graph, 'y'):
+            y = graph.y[node_indices]
+            # Convert to one-hot encoding if needed
+            if len(y.shape) == 1:
+                num_classes = y.max().item() + 1
+                y = torch.nn.functional.one_hot(y, num_classes).float()
+        
         # Create new data object
         subgraph = Data(
-            x=graph.x[node_indices],
+            x=x,
             edge_index=new_edge_index,
-            y=graph.y[node_indices] if hasattr(graph, 'y') else None
+            y=y
         )
         
         return subgraph
