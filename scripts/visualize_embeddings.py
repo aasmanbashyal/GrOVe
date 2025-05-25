@@ -23,8 +23,15 @@ def plot_embeddings(embeddings, labels, title, save_path):
     plt.savefig(save_path)
     plt.close()
 
-def visualize_embeddings(embeddings_path, output_dir, perplexity=30):
-    """Visualize embeddings using PCA and t-SNE."""
+def visualize_embeddings(embeddings_path, output_dir, perplexity=30, viz_type='both'):
+    """Visualize embeddings using PCA and/or t-SNE.
+    
+    Args:
+        embeddings_path: Path to embeddings file
+        output_dir: Directory to save visualizations
+        perplexity: Perplexity parameter for t-SNE
+        viz_type: Type of visualization ('pca', 'tsne', or 'both')
+    """
     # Create output directory
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -50,55 +57,41 @@ def visualize_embeddings(embeddings_path, output_dir, perplexity=30):
         combined_emb = np.vstack([train_emb, val_emb])
         combined_labels = np.concatenate([train_labels, val_labels])
         
-        # 1. PCA
-        pca = PCA(n_components=2)
-        pca_emb = pca.fit_transform(combined_emb)
-        plot_embeddings(
-            pca_emb, 
-            combined_labels,
-            f'PCA Visualization of {emb_type.capitalize()} Embeddings\n{model_name.upper()} on {dataset} ({role}, {split_type})',
-            output_path / f'{file_name}_{emb_type}_pca.png'
-        )
+        # Generate visualizations based on viz_type
+        if viz_type in ['pca', 'both']:
+            pca = PCA(n_components=2)
+            pca_emb = pca.fit_transform(combined_emb)
+            plot_embeddings(
+                pca_emb, 
+                combined_labels,
+                f'PCA Visualization of {emb_type.capitalize()} Embeddings\n{model_name.upper()} on {dataset} ({role}, {split_type})',
+                output_path / f'{file_name}_{emb_type}_pca.png'
+            )
         
-        # 2. t-SNE
-        tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42)
-        tsne_emb = tsne.fit_transform(combined_emb)
-        plot_embeddings(
-            tsne_emb,
-            combined_labels,
-            f't-SNE Visualization of {emb_type.capitalize()} Embeddings\n{model_name.upper()} on {dataset} ({role}, {split_type})',
-            output_path / f'{file_name}_{emb_type}_tsne.png'
-        )
-        
-        # Create a combined plot
-        fig, axes = plt.subplots(1, 2, figsize=(16, 8))
-        fig.suptitle(f'Embedding Visualizations for {model_name.upper()} on {dataset} ({role}, {split_type})\n{emb_type.capitalize()} Embeddings', fontsize=16)
-        
-        # PCA
-        scatter1 = axes[0].scatter(pca_emb[:, 0], pca_emb[:, 1], c=combined_labels, cmap='tab10', alpha=0.6)
-        axes[0].set_title('PCA')
-        plt.colorbar(scatter1, ax=axes[0])
-        
-        # t-SNE
-        scatter2 = axes[1].scatter(tsne_emb[:, 0], tsne_emb[:, 1], c=combined_labels, cmap='tab10', alpha=0.6)
-        axes[1].set_title('t-SNE')
-        plt.colorbar(scatter2, ax=axes[1])
-        
-        plt.tight_layout()
-        plt.savefig(output_path / f'{file_name}_{emb_type}_combined.png')
-        plt.close()
+        if viz_type in ['tsne', 'both']:
+            tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42)
+            tsne_emb = tsne.fit_transform(combined_emb)
+            plot_embeddings(
+                tsne_emb,
+                combined_labels,
+                f't-SNE Visualization of {emb_type.capitalize()} Embeddings\n{model_name.upper()} on {dataset} ({role}, {split_type})',
+                output_path / f'{file_name}_{emb_type}_tsne.png'
+            )
 
 def main():
     parser = argparse.ArgumentParser(description='Visualize GNN embeddings using PCA and t-SNE')
     parser.add_argument('--embeddings-path', type=str, required=True, help='Path to the embeddings file')
     parser.add_argument('--output-dir', type=str, default='visualizations', help='Output directory for visualizations')
     parser.add_argument('--perplexity', type=int, default=30, help='Perplexity parameter for t-SNE')
+    parser.add_argument('--viz-type', type=str, default='both', choices=['pca', 'tsne', 'both'],
+                      help='Type of visualization to generate (pca, tsne, or both)')
     args = parser.parse_args()
     
     visualize_embeddings(
         args.embeddings_path,
         args.output_dir,
-        args.perplexity
+        args.perplexity,
+        args.viz_type
     )
 
 if __name__ == '__main__':
