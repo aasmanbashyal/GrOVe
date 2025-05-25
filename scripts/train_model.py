@@ -9,10 +9,11 @@ from tqdm import tqdm
 
 def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, device='cuda', epochs=100, lr=0.001, 
                 batch_size=32, hidden_dim=128, dropout=0.5, early_stopping=10, 
-                random_seed=42, model_role='target', split_type='non-overlapped'):
+                seed=42, model_role='target', split_type='non-overlapped'):
+    
     # Set random seed for reproducibility
-    torch.manual_seed(random_seed)
-    np.random.seed(random_seed)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
     
     # Load data with safe globals for PyTorch Geometric
     torch.serialization.add_safe_globals([
@@ -240,11 +241,11 @@ def main():
     parser.add_argument('--hidden-dim', type=int, default=128, help='Hidden dimension')
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
     parser.add_argument("--early-stopping", type=int, default=10, help="Early stopping patience (default: 10)")
-    parser.add_argument("--random-seed", type=int, default=42, help="Random seed (default: 42)")
+    parser.add_argument("--seed", type=int, default=42, help="Model seed")
     parser.add_argument("--model-role", type=str, default="target", choices=["target", "independent", "surrogate"], help="Model role (default: target)")
     parser.add_argument("--split-type", type=str, default="non-overlapped", choices=["non-overlapped", "overlapped"], help="Split type (default: non-overlapped)")
     args = parser.parse_args()
-    train_model(args.model, args.dataset, args.output_dir, args.embeddings_dir, args.device, args.epochs, args.lr, args.batch_size, args.hidden_dim, args.dropout, args.early_stopping, args.random_seed, args.model_role, args.split_type)
+    train_model(args.model, args.dataset, args.output_dir, args.embeddings_dir, args.device, args.epochs, args.lr, args.batch_size, args.hidden_dim, args.dropout, args.early_stopping, args.seed, args.model_role, args.split_type)
 
 if __name__ == '__main__':
     main()
