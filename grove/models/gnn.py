@@ -408,11 +408,11 @@ class GraphSAGEModel(BaseGNNModel):
         h = F.relu(h)
         h = F.dropout(h, p=self.dropout, training=self.training)
         
-
-        # Second GraphSAGE layer
-        h = self.sage2(h, edge_index2)
         # Store embeddings 
         embeddings = h
+        # Second GraphSAGE layer
+        h = self.sage2(h, edge_index2)
+
         # Apply softmax for classification
         predictions = F.log_softmax(h, dim=1)
         
