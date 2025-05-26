@@ -21,7 +21,7 @@ docker-compose up --build
 
 ## Dataset
 
-The datasets used in this project can be downloaded from our GitHub repository:
+The datasets used in this project can be downloaded from GitHub repository:
 
 1. Download the datasets:
 ```bash
