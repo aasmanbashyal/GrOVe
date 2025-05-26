@@ -6,14 +6,70 @@ import numpy as np
 from pathlib import Path
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
+from torch_geometric.data import Data
 
-def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, device='cuda', epochs=100, lr=0.001, 
-                batch_size=32, hidden_dim=128, dropout=0.5, early_stopping=10, 
+def set_random_seed(seed, use_cuda=True):
+    """
+    Set random seed for reproducibility.
+    
+    Args:
+        seed: Random seed
+        use_cuda: Whether to set CUDA seed as well
+    """
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if use_cuda and torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    
+
+def shuffle_data(data, seed):
+    """
+    Shuffle the data according to the given seed.
+    
+    Args:
+        data: PyTorch Geometric data object
+        seed: Random seed for shuffling
+    """
+    # Set random seed for shuffling
+    np.random.seed(seed)
+    
+    # Get number of nodes
+    num_nodes = data.x.size(0)
+    
+    # Create permutation indices
+    perm = np.random.permutation(num_nodes)
+    
+    # Shuffle node features
+    data.x = data.x[perm]
+    
+    # Shuffle labels if they exist
+    if hasattr(data, 'y'):
+        data.y = data.y[perm]
+    
+    # Update edge indices according to the new node ordering
+    if hasattr(data, 'edge_index'):
+        # Create mapping from old indices to new indices
+        idx_map = {j: i for i, j in enumerate(perm)}
+        
+        # Update edge indices
+        new_edge_index = torch.zeros_like(data.edge_index)
+        for i in range(data.edge_index.size(1)):
+            new_edge_index[0, i] = idx_map[data.edge_index[0, i].item()]
+            new_edge_index[1, i] = idx_map[data.edge_index[1, i].item()]
+        data.edge_index = new_edge_index
+    
+    return data
+
+
+def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, device='cuda', epochs=200, lr=0.001, 
+                batch_size=32, hidden_dim=256, dropout=0.5, early_stopping=10, 
                 seed=42, model_role='target', split_type='non-overlapped'):
     
+    
     # Set random seed for reproducibility
-    torch.manual_seed(seed)
-    np.random.seed(seed)
+    set_random_seed(seed, use_cuda=True if device == 'cuda' else False)
     
     # Load data with safe globals for PyTorch Geometric
     torch.serialization.add_safe_globals([
@@ -28,19 +84,34 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
     
     target_train = torch.load(os.path.join(data_dir, 'target_train.pt'), weights_only=False)
     surrogate_train = torch.load(os.path.join(data_dir, 'surrogate_train.pt'), weights_only=False)
-    independent_train = torch.load(os.path.join(data_dir, 'target_train.pt'), weights_only=False)
     test = torch.load(os.path.join(data_dir, 'test.pt'), weights_only=False)
     verification = torch.load(os.path.join(data_dir, 'verification.pt'), weights_only=False)
     
+    # For independent model, use the same data as target but with different initialization
+    independent_train = target_train
+    
+    # Shuffle data according to role-specific seed
+    # print(f"Shuffling data with role-specific seed: {seed}")
+    # target_train = shuffle_data(target_train, seed)
+    # surrogate_train = shuffle_data(surrogate_train, seed)
+    # test = shuffle_data(test, seed)
+    # verification = shuffle_data(verification, seed)
+
+    # target_train = shuffle_data(target_train)
+    # surrogate_train = shuffle_data(surrogate_train)
+    # test = shuffle_data(test)
+    # verification = shuffle_data(verification)
     # Debug prints for data shapes
     print(f"\nData shapes:")
     print(f"target_train.x shape: {target_train.x.shape}")
     print(f"target_train.y shape: {target_train.y.shape if hasattr(target_train, 'y') else 'No y attribute'}")
     print(f"target_train.edge_index shape: {target_train.edge_index.shape}")
+    print(f"Model role: {model_role} with seed: {seed}")
     
     # Ensure y is properly shaped
     if not hasattr(target_train, 'y'):
         raise ValueError("Target training data missing 'y' attribute")
+    
     if len(target_train.y.shape) == 1:
         # If y is 1D, convert to 2D one-hot encoding
         num_classes = target_train.y.max().item() + 1
@@ -56,13 +127,57 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
     print(f"Output dimension: {output_dim}")
     
     if model_name == 'gat':
-        model = GATModel(input_dim, hidden_dim, output_dim, dropout=dropout)
+        # Three-layer GAT model with 4 attention heads in first and second layers
+        model = GATModel(
+            in_feats=input_dim, 
+            h_feats=hidden_dim, 
+            out_feats=output_dim, 
+            num_heads=4, 
+            num_layers=3,  
+            dropout=dropout
+        )
+        print("Initialized 3-layer GAT model with 4 attention heads in first and second layers")
     elif model_name == 'gin':
-        model = GINModel(input_dim, hidden_dim, output_dim, dropout=dropout)
+        # Three-layer GIN model with neighborhood sample size of 10
+        model = GINModel(
+            in_feats=input_dim, 
+            h_feats=hidden_dim, 
+            out_feats=output_dim, 
+            num_layers=3,  
+            dropout=dropout
+        )
+        print("Initialized 3-layer GIN model with neighborhood sample size of 10")
     elif model_name == 'sage':
-        model = GraphSAGEModel(input_dim, hidden_dim, output_dim, dropout=dropout)
+        # Two-layer GraphSAGE model with neighborhood sample sizes of 25 and 10
+        model = GraphSAGEModel(
+            in_feats=input_dim, 
+            h_feats=hidden_dim, 
+            out_feats=output_dim, 
+            num_layers=2,  
+            aggregator_type='mean',  
+            dropout=dropout
+        )
+        print("Initialized 2-layer GraphSAGE model with neighborhood sample sizes of 25 and 10")
     else:
         raise ValueError(f"Invalid model name: {model_name}")
+    
+    # Apply initialization depending on model role
+    def init_weights(m):
+        if isinstance(m, torch.nn.Linear):
+            if model_role == 'independent':
+                # Use Kaiming initialization for independent model
+                torch.nn.init.kaiming_uniform_(m.weight, nonlinearity='relu')
+            else:
+                # Use Xavier/Glorot initialization for target and surrogate
+                torch.nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                torch.nn.init.zeros_(m.bias)
+        elif isinstance(m, torch.nn.BatchNorm1d):
+            torch.nn.init.constant_(m.weight, 1.0)
+            torch.nn.init.constant_(m.bias, 0.0)
+    
+    # Apply the initialization to model weights
+    model.apply(init_weights)
     
     model = model.to(device)
     
@@ -78,19 +193,22 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
     
     # Create data loaders
     train_loader = DataLoader([train_data], batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader([verification], batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader([test], batch_size=batch_size, shuffle=False)
     
-    # Setup optimizer and loss function
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # Setup optimizer
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-4)
     criterion = torch.nn.CrossEntropyLoss()
     
     # Training loop with early stopping
     best_val_loss = float('inf')
+    best_val_acc = 0.0
     patience_counter = 0
     best_model_state = None
     best_epoch = 0
     train_losses = []
     val_losses = []
+    train_accuracies = []
+    val_accuracies = []
     best_embeddings = None
     
     # Create progress bar
@@ -101,6 +219,8 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
         model.train()
         total_train_loss = 0
         all_train_embeddings = []
+        train_correct = 0
+        train_total = 0
         
         for batch in train_loader:
             batch = batch.to(device)
@@ -112,25 +232,43 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
             
             total_train_loss += loss.item()
             all_train_embeddings.append(embeddings.detach())
+            
+            # Calculate accuracy
+            _, predicted = torch.max(out, 1)
+            _, labels = torch.max(batch.y, 1)
+            train_correct += (predicted == labels).sum().item()
+            train_total += labels.size(0)
         
         avg_train_loss = total_train_loss / len(train_loader)
+        train_accuracy = train_correct / train_total if train_total > 0 else 0
         train_losses.append(avg_train_loss)
+        train_accuracies.append(train_accuracy)
         
         # Validation
         model.eval()
         total_val_loss = 0
         all_val_embeddings = []
+        val_correct = 0
+        val_total = 0
         
         with torch.no_grad():
-            for batch in val_loader:
+            for batch in test_loader:
                 batch = batch.to(device)
                 embeddings, out = model(batch)
                 loss = criterion(out, batch.y)
                 total_val_loss += loss.item()
                 all_val_embeddings.append(embeddings.detach())
+                
+                # Calculate accuracy
+                _, predicted = torch.max(out, 1)
+                _, labels = torch.max(batch.y, 1)
+                val_correct += (predicted == labels).sum().item()
+                val_total += labels.size(0)
         
-        avg_val_loss = total_val_loss / len(val_loader)
+        avg_val_loss = total_val_loss / len(test_loader)
+        val_accuracy = val_correct / val_total if val_total > 0 else 0
         val_losses.append(avg_val_loss)
+        val_accuracies.append(val_accuracy)
         
         # Concatenate embeddings
         train_embeddings = torch.cat(all_train_embeddings, dim=0)
@@ -140,12 +278,15 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
         pbar.set_postfix({
             'train_loss': f'{avg_train_loss:.4f}',
             'val_loss': f'{avg_val_loss:.4f}',
+            'train_acc': f'{train_accuracy:.4f}',
+            'val_acc': f'{val_accuracy:.4f}',
             'patience': f'{patience_counter}/{early_stopping}'
         })
         
         # Early stopping check
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
+            best_val_acc = val_accuracy
             patience_counter = 0
             best_model_state = model.state_dict().copy()
             best_epoch = epoch
@@ -159,23 +300,43 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
             if patience_counter >= early_stopping:
                 print(f'\nEarly stopping triggered after {epoch+1} epochs')
                 print(f'Best validation loss: {best_val_loss:.4f} at epoch {best_epoch+1}')
+                print(f'Best validation accuracy: {best_val_acc:.4f}')
                 break
     
     # Get final embeddings
     model.eval()
     final_train_embeddings = []
     final_val_embeddings = []
+    final_train_correct = 0
+    final_train_total = 0
+    final_val_correct = 0
+    final_val_total = 0
     
     with torch.no_grad():
         for batch in train_loader:
             batch = batch.to(device)
-            embeddings, _ = model(batch)
+            embeddings, out = model(batch)
             final_train_embeddings.append(embeddings.detach())
+            
+            # Calculate final accuracy
+            _, predicted = torch.max(out, 1)
+            _, labels = torch.max(batch.y, 1)
+            final_train_correct += (predicted == labels).sum().item()
+            final_train_total += labels.size(0)
         
-        for batch in val_loader:
+        for batch in test_loader:
             batch = batch.to(device)
-            embeddings, _ = model(batch)
+            embeddings, out = model(batch)
             final_val_embeddings.append(embeddings.detach())
+            
+            # Calculate final accuracy
+            _, predicted = torch.max(out, 1)
+            _, labels = torch.max(batch.y, 1)
+            final_val_correct += (predicted == labels).sum().item()
+            final_val_total += labels.size(0)
+    
+    final_train_accuracy = final_train_correct / final_train_total if final_train_total > 0 else 0
+    final_val_accuracy = final_val_correct / final_val_total if final_val_total > 0 else 0
     
     final_embeddings = {
         'train': torch.cat(final_train_embeddings, dim=0).cpu(),
@@ -185,8 +346,11 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
     # Print training summary
     print("\nTraining Summary:")
     print(f"Best validation loss: {best_val_loss:.4f} at epoch {best_epoch+1}")
+    print(f"Best validation accuracy: {best_val_acc:.4f}")
     print(f"Final training loss: {train_losses[-1]:.4f}")
     print(f"Final validation loss: {val_losses[-1]:.4f}")
+    print(f"Final training accuracy: {final_train_accuracy:.4f}")
+    print(f"Final validation accuracy: {final_val_accuracy:.4f}")
     
     # Save the best model and embeddings
     if best_model_state is not None:
@@ -213,32 +377,71 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
             'training_history': {
                 'train_losses': train_losses,
                 'val_losses': val_losses,
+                'train_accuracies': train_accuracies,
+                'val_accuracies': val_accuracies,
                 'best_epoch': best_epoch,
-                'best_val_loss': best_val_loss
+                'best_val_loss': best_val_loss,
+                'best_val_acc': best_val_acc
             }
         }, model_save_path)
         print(f"Model saved to {model_save_path}")
         
         # Save embeddings
-        embeddings_save_path = embeddings_path / f"{model_name}_{dataset_name}_{model_role}_{split_type}_embeddings.pt"
+        embeddings_save_path = embeddings_path / f"{model_name}_{dataset_name}_{model_role}.pt"
+        
+        # Create Data objects for train and validation embeddings
+        train_data = Data(
+            x=best_embeddings['train'],
+            y=None,  
+            embedding_type='best_train'
+        )
+        
+        val_data = Data(
+            x=best_embeddings['val'],
+            y=None,  
+            embedding_type='best_val'
+        )
+        
+        final_train_data = Data(
+            x=final_embeddings['train'],
+            y=None,  
+            embedding_type='final_train'
+        )
+        
+        final_val_data = Data(
+            x=final_embeddings['val'],
+            y=None,  
+            embedding_type='final_val'
+        )
+        
+        # Save in PyG Data format
         torch.save({
-            'best_embeddings': best_embeddings,
-            'final_embeddings': final_embeddings,
-            'best_epoch': best_epoch
+            'best_embeddings': {
+                'train': train_data,
+                'val': val_data
+            },
+            'final_embeddings': {
+                'train': final_train_data,
+                'val': final_val_data
+            },
+            'best_epoch': best_epoch,
+            'best_val_acc': best_val_acc,
+            'final_train_acc': final_train_accuracy,
+            'final_val_acc': final_val_accuracy
         }, embeddings_save_path)
         print(f"Embeddings saved to {embeddings_save_path}")
 
 def main():
     parser = argparse.ArgumentParser(description='Train a Grove GNN model')
     parser.add_argument('--model', type=str, default='gat', choices=['gat', 'gin', 'sage'], help='Model to train')
-    parser.add_argument('--dataset', type=str, default='citeseer', choices=['citeseer', 'cora', 'pubmed'], help='Dataset to train on')
+    parser.add_argument('--dataset', type=str, default='citeseer', help='Dataset to train on')
     parser.add_argument('--output-dir', type=str, default='models', help='Output directory for model checkpoints')
     parser.add_argument('--embeddings-dir', type=str, default=None, help='Output directory for embeddings (defaults to output-dir if not specified)')
     parser.add_argument('--device', type=str, default='cuda', choices=['cuda', 'cpu'], help='Device to train on')
-    parser.add_argument('--epochs', type=int, default=100, help='Number of epochs to train')
+    parser.add_argument('--epochs', type=int, default=200, help='Number of epochs to train')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
-    parser.add_argument('--hidden-dim', type=int, default=128, help='Hidden dimension')
+    parser.add_argument('--hidden-dim', type=int, default=256, help='Hidden dimension')
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
     parser.add_argument("--early-stopping", type=int, default=10, help="Early stopping patience (default: 10)")
     parser.add_argument("--seed", type=int, default=42, help="Model seed")
