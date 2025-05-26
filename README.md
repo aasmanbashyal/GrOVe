@@ -32,7 +32,7 @@ https://github.com/xinleihe/GNNStealing/tree/master/code/datasets
 
 
 
-#### Embedding Distribution Plots
+## Embedding Distribution Plots
 
 Below are t-SNE visualizations of embeddings for different models and datasets. The captions describe the model, dataset, and perplexity value used for each plot.
 
