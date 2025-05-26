@@ -36,25 +36,37 @@ https://github.com/xinleihe/GNNStealing/tree/master/code/datasets
 
 Below are t-SNE visualizations of embeddings for different models and datasets. The captions describe the model, dataset, and perplexity value used for each plot.
 
-- **GNN: GIN, Dataset: Citeseer, Split: non-overlapped, Perplexity: 5**
+- **GNN: GIN, Dataset: Citeseer, Split: non-overlapped, Perplexity: 30**
 
-  ![Target vs Independent vs Surrogate Distances](visualizations/non-overlapped/gin_citeseer/citeseer_tsne_per_5.png)
+  ![Target vs Independent vs Surrogate Distances](visualizations/non-overlapped/gin_citeseer/citeseer_tsne_per_30.png)
 
-- **GNN: GAT, Dataset: Citeseer, Split: non-overlapped, Perplexity: 5**
+- **GNN: GAT, Dataset: Citeseer, Split: non-overlapped, Perplexity: 30**
 
-  ![Target vs Independent vs Surrogate Distances](visualizations/non-overlapped/gat_citeseer/citeseer_tsne_per_5.png)
+  ![Target vs Independent vs Surrogate Distances](visualizations/non-overlapped/gat_citeseer/citeseer_tsne_per_30.png)
 
-- **GNN: GraphSAGE, Dataset: Citeseer, Split: non-overlapped, Perplexity: 5**
+- **GNN: GraphSAGE, Dataset: Citeseer, Split: non-overlapped, Perplexity: 30**
 
-  ![Target vs Independent vs Surrogate Distances](visualizations/non-overlapped/sage_citeseer/citeseer_tsne_per_5.png)
+  ![Target vs Independent vs Surrogate Distances](visualizations/non-overlapped/sage_citeseer/citeseer_tsne_per_30.png)
 
-- **GNN: GAT, Dataset: Coauthor, Split: non-overlapped, Perplexity: 5**
+- **GNN: GIN, Dataset: Citeseer, Split: overlapped, Perplexity: 30**
 
-  ![Target vs Independent vs Surrogate Distances](visualizations/non-overlapped/gat_coauthor/coauthor_tsne_per_5.png)
+  ![Target vs Independent vs Surrogate Distances](visualizations/overlapped/gin_citeseer/citeseer_tsne_per_30.png)
 
-- **GNN: GAT, Dataset: ACM, Split: non-overlapped, Perplexity: 5**
+- **GNN: GAT, Dataset: Citeseer, Split: overlapped, Perplexity: 30**
 
-  ![Target vs Independent vs Surrogate Distances](visualizations/non-overlapped/gat_acm/acm_tsne_per_5.png)
+  ![Target vs Independent vs Surrogate Distances](visualizations/overlapped/gat_citeseer/citeseer_tsne_per_30.png)
+
+- **GNN: GraphSAGE, Dataset: Citeseer, Split: overlapped, Perplexity: 30**
+
+  ![Target vs Independent vs Surrogate Distances](visualizations/overlapped/sage_citeseer/citeseer_tsne_per_30.png)
+
+- **GNN: GAT, Dataset: Coauthor, Split: non-overlapped, Perplexity: 30**
+
+  ![Target vs Independent vs Surrogate Distances](visualizations/non-overlapped/gat_coauthor/coauthor_tsne_per_30.png)
+
+- **GNN: GAT, Dataset: ACM, Split: non-overlapped, Perplexity: 30**
+
+  ![Target vs Independent vs Surrogate Distances](visualizations/non-overlapped/gat_acm/acm_tsne_per_30.png)
 
 
 ## Citation
