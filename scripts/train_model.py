@@ -194,6 +194,7 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
     # Create data loaders
     train_loader = DataLoader([train_data], batch_size=batch_size, shuffle=True)
     test_loader = DataLoader([test], batch_size=batch_size, shuffle=False)
+    verification_loader = DataLoader([verification], batch_size=batch_size, shuffle=False)
     
     # Setup optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-4)
@@ -209,7 +210,7 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
     val_losses = []
     train_accuracies = []
     val_accuracies = []
-    best_embeddings = None
+    best_verification_embeddings = None
     
     # Create progress bar
     pbar = tqdm(range(epochs), desc='Training Progress')
@@ -218,7 +219,6 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
         # Training
         model.train()
         total_train_loss = 0
-        all_train_embeddings = []
         train_correct = 0
         train_total = 0
         
@@ -231,7 +231,6 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
             optimizer.step()
             
             total_train_loss += loss.item()
-            all_train_embeddings.append(embeddings.detach())
             
             # Calculate accuracy
             _, predicted = torch.max(out, 1)
@@ -247,7 +246,7 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
         # Validation
         model.eval()
         total_val_loss = 0
-        all_val_embeddings = []
+        all_verification_embeddings = []
         val_correct = 0
         val_total = 0
         
@@ -257,22 +256,30 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
                 embeddings, out = model(batch)
                 loss = criterion(out, batch.y)
                 total_val_loss += loss.item()
-                all_val_embeddings.append(embeddings.detach())
                 
                 # Calculate accuracy
                 _, predicted = torch.max(out, 1)
                 _, labels = torch.max(batch.y, 1)
                 val_correct += (predicted == labels).sum().item()
                 val_total += labels.size(0)
+            
+            # Generate verification embeddings
+            for batch in verification_loader:
+                batch = batch.to(device)
+                embeddings, _ = model(batch)
+                all_verification_embeddings.append(embeddings.detach())
         
         avg_val_loss = total_val_loss / len(test_loader)
         val_accuracy = val_correct / val_total if val_total > 0 else 0
         val_losses.append(avg_val_loss)
         val_accuracies.append(val_accuracy)
         
-        # Concatenate embeddings
-        train_embeddings = torch.cat(all_train_embeddings, dim=0)
-        val_embeddings = torch.cat(all_val_embeddings, dim=0)
+        # Concatenate verification embeddings
+        verification_embeddings = torch.cat(all_verification_embeddings, dim=0)
+        
+        # Debug print for verification embeddings
+        if epoch == 0:  # Print only on first epoch to avoid spam
+            print(f"Generated verification embeddings for {model_role}: shape {verification_embeddings.shape}")
         
         # Update progress bar
         pbar.set_postfix({
@@ -290,11 +297,8 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
             patience_counter = 0
             best_model_state = model.state_dict().copy()
             best_epoch = epoch
-            # Store best embeddings
-            best_embeddings = {
-                'train': train_embeddings.cpu(),
-                'val': val_embeddings.cpu()
-            }
+            # Store best verification embeddings
+            best_verification_embeddings = verification_embeddings.cpu()
         else:
             patience_counter += 1
             if patience_counter >= early_stopping:
@@ -303,20 +307,19 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
                 print(f'Best validation accuracy: {best_val_acc:.4f}')
                 break
     
-    # Get final embeddings
+    # Get final verification embeddings
     model.eval()
-    final_train_embeddings = []
-    final_val_embeddings = []
+    final_verification_embeddings = []
     final_train_correct = 0
     final_train_total = 0
     final_val_correct = 0
     final_val_total = 0
     
     with torch.no_grad():
+        # Calculate final accuracies for reporting
         for batch in train_loader:
             batch = batch.to(device)
-            embeddings, out = model(batch)
-            final_train_embeddings.append(embeddings.detach())
+            _, out = model(batch)
             
             # Calculate final accuracy
             _, predicted = torch.max(out, 1)
@@ -326,22 +329,24 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
         
         for batch in test_loader:
             batch = batch.to(device)
-            embeddings, out = model(batch)
-            final_val_embeddings.append(embeddings.detach())
+            _, out = model(batch)
             
             # Calculate final accuracy
             _, predicted = torch.max(out, 1)
             _, labels = torch.max(batch.y, 1)
             final_val_correct += (predicted == labels).sum().item()
             final_val_total += labels.size(0)
+        
+        # Generate final verification embeddings
+        for batch in verification_loader:
+            batch = batch.to(device)
+            embeddings, _ = model(batch)
+            final_verification_embeddings.append(embeddings.detach())
     
     final_train_accuracy = final_train_correct / final_train_total if final_train_total > 0 else 0
     final_val_accuracy = final_val_correct / final_val_total if final_val_total > 0 else 0
     
-    final_embeddings = {
-        'train': torch.cat(final_train_embeddings, dim=0).cpu(),
-        'val': torch.cat(final_val_embeddings, dim=0).cpu()
-    }
+    final_verification_embeddings = torch.cat(final_verification_embeddings, dim=0).cpu()
     
     # Print training summary
     print("\nTraining Summary:")
@@ -352,7 +357,7 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
     print(f"Final training accuracy: {final_train_accuracy:.4f}")
     print(f"Final validation accuracy: {final_val_accuracy:.4f}")
     
-    # Save the best model and embeddings
+    # Save the best model and verification embeddings
     if best_model_state is not None:
         # Create output directories
         output_path = Path(output_dir)
@@ -386,50 +391,37 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
         }, model_save_path)
         print(f"Model saved to {model_save_path}")
         
-        # Save embeddings
+        # Save verification embeddings only
         embeddings_save_path = embeddings_path / f"{model_name}_{dataset_name}_{model_role}.pt"
         
-        # Create Data objects for train and validation embeddings
-        train_data = Data(
-            x=best_embeddings['train'],
+        # Create Data objects for verification embeddings
+        best_verification_data = Data(
+            x=best_verification_embeddings,
             y=None,  
-            embedding_type='best_train'
+            embedding_type='best_verification'
         )
         
-        val_data = Data(
-            x=best_embeddings['val'],
+        final_verification_data = Data(
+            x=final_verification_embeddings,
             y=None,  
-            embedding_type='best_val'
+            embedding_type='final_verification'
         )
         
-        final_train_data = Data(
-            x=final_embeddings['train'],
-            y=None,  
-            embedding_type='final_train'
-        )
-        
-        final_val_data = Data(
-            x=final_embeddings['val'],
-            y=None,  
-            embedding_type='final_val'
-        )
-        
-        # Save in PyG Data format
+        # Save in PyG Data format - only verification embeddings
         torch.save({
             'best_embeddings': {
-                'train': train_data,
-                'val': val_data
+                'verification': best_verification_data
             },
             'final_embeddings': {
-                'train': final_train_data,
-                'val': final_val_data
+                'verification': final_verification_data
             },
             'best_epoch': best_epoch,
             'best_val_acc': best_val_acc,
             'final_train_acc': final_train_accuracy,
             'final_val_acc': final_val_accuracy
         }, embeddings_save_path)
-        print(f"Embeddings saved to {embeddings_save_path}")
+        print(f"Verification embeddings saved to {embeddings_save_path}")
+        print(f"Verification embeddings shape: {best_verification_data.x.shape}")
 
 def main():
     parser = argparse.ArgumentParser(description='Train a Grove GNN model')

@@ -76,17 +76,18 @@ def plot_embeddings(embeddings_paths, output_dir, combined=True, perplexity=30):
         # Extract embeddings from PyG Data objects
         best_embeddings = embeddings_data['best_embeddings']
         
-        # Handle PyTorch Geometric Data objects
-        if isinstance(best_embeddings['train'], Data):
-            train_embeddings = best_embeddings['train'].x.numpy()
-            val_embeddings = best_embeddings['val'].x.numpy()
+        # Extract verification embeddings (should be the only embeddings saved)
+        if 'verification' in best_embeddings:
+            if isinstance(best_embeddings['verification'], Data):
+                verification_embeddings = best_embeddings['verification'].x.numpy()
+            else:
+                verification_embeddings = best_embeddings['verification'].numpy()
+            print(f"Using verification embeddings for {model_role}: shape {verification_embeddings.shape}")
         else:
-            # Fallback for old format
-            train_embeddings = best_embeddings['train'].numpy()
-            val_embeddings = best_embeddings['val'].numpy()
+            raise ValueError(f"No verification embeddings found for {model_role} in {path}")
         
-        # Combine train and val embeddings
-        combined_embeddings = np.vstack([train_embeddings, val_embeddings])
+        # Use verification embeddings for visualization
+        combined_embeddings = verification_embeddings
         
         # Store original embeddings
         model_data[model_role] = {
