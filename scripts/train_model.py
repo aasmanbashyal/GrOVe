@@ -83,24 +83,36 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
     print(f"Loading data from: {data_dir}")
     
     target_train = torch.load(os.path.join(data_dir, 'target_train.pt'), weights_only=False)
-    surrogate_train = torch.load(os.path.join(data_dir, 'surrogate_train.pt'), weights_only=False)
+    
+    # Load independent_train if it exists, otherwise use target_train
+    independent_train_path = os.path.join(data_dir, 'independent_train.pt')
+    if os.path.exists(independent_train_path):
+        independent_train = torch.load(independent_train_path, weights_only=False)
+        print(f"Loaded independent_train data: {independent_train.x.shape[0]} nodes")
+    else:
+        independent_train = target_train
+        print(f"Using target_train data for independent model (same data, different seed)")
+    
+    # Load query_train if it exists, otherwise use surrogate_train
+    query_train_path = os.path.join(data_dir, 'query_train.pt')
+    if os.path.exists(query_train_path):
+        query_train = torch.load(query_train_path, weights_only=False)
+        print(f"Loaded query_train data: {query_train.x.shape[0]} nodes")
+    else:
+        query_train = torch.load(os.path.join(data_dir, 'surrogate_train.pt'), weights_only=False)
+        print(f"Using surrogate_train data for query (fallback)")
+    
     test = torch.load(os.path.join(data_dir, 'test.pt'), weights_only=False)
-    verification = torch.load(os.path.join(data_dir, 'verification.pt'), weights_only=False)
     
-    # For independent model, use the same data as target but with different initialization
-    independent_train = target_train
-    
-    # Shuffle data according to role-specific seed
-    # print(f"Shuffling data with role-specific seed: {seed}")
-    # target_train = shuffle_data(target_train, seed)
-    # surrogate_train = shuffle_data(surrogate_train, seed)
-    # test = shuffle_data(test, seed)
-    # verification = shuffle_data(verification, seed)
+    # Load validation if it exists, otherwise use verification
+    validation_path = os.path.join(data_dir, 'validation.pt')
+    if os.path.exists(validation_path):
+        validation = torch.load(validation_path, weights_only=False)
+        print(f"Loaded validation data: {validation.x.shape[0]} nodes")
+    else:
+        validation = torch.load(os.path.join(data_dir, 'verification.pt'), weights_only=False)
+        print(f"Using verification data for validation (fallback)")
 
-    # target_train = shuffle_data(target_train)
-    # surrogate_train = shuffle_data(surrogate_train)
-    # test = shuffle_data(test)
-    # verification = shuffle_data(verification)
     # Debug prints for data shapes
     print(f"\nData shapes:")
     print(f"target_train.x shape: {target_train.x.shape}")
@@ -187,14 +199,16 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
     elif model_role == 'independent':
         train_data = independent_train
     elif model_role == 'surrogate':
-        train_data = surrogate_train
+        # This traditional surrogate training is kept for compatibility
+        train_data = query_train
+        print("⚠️ Note: Using traditional surrogate training.")
     else:
-        raise ValueError(f"Invalid model role: {model_role}")
+        raise ValueError(f"❌ Invalid model role: {model_role}")
     
     # Create data loaders
     train_loader = DataLoader([train_data], batch_size=batch_size, shuffle=True)
     test_loader = DataLoader([test], batch_size=batch_size, shuffle=False)
-    verification_loader = DataLoader([verification], batch_size=batch_size, shuffle=False)
+    verification_loader = DataLoader([validation], batch_size=batch_size, shuffle=False)
     
     # Setup optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-4)
