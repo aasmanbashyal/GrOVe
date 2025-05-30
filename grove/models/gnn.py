@@ -142,10 +142,13 @@ class GATModel(BaseGNNModel):
             h_feats * num_heads, h_feats, heads=num_heads, dropout=dropout
         )
         
-        # Output layer (combine multiple heads)
+        # Final layer for output (embeddings layer)
         self.gat3 = GATConv(
-            h_feats * num_heads, out_feats, heads=1, concat=False, dropout=dropout
+            h_feats * num_heads, h_feats, heads=1, concat=False, dropout=dropout
         )
+        
+        # Dense layer for classification
+        self.classifier = nn.Linear(h_feats, out_feats)
     
     def forward(self, data):
         """
@@ -159,7 +162,7 @@ class GATModel(BaseGNNModel):
         """
         x, edge_index = data.x, data.edge_index
         
-        # Sample neighbors for each layer, fixed at 10 as per paper
+        # Sample neighbors for each layer, fixed at 10
         edge_index1 = self._sample_neighbors(edge_index, 10)
         edge_index2 = self._sample_neighbors(edge_index, 10)
         edge_index3 = self._sample_neighbors(edge_index, 10)
@@ -174,13 +177,14 @@ class GATModel(BaseGNNModel):
         h = F.relu(h)
         h = F.dropout(h, p=self.dropout, training=self.training)
         
-        # Store embeddings
-        embeddings = h
-        # Third GAT layer
-        h = self.gat3(h, edge_index3)
+        # Third GAT layer (embeddings layer)
+        embeddings = self.gat3(h, edge_index3)
+        embeddings = F.relu(embeddings)
+        embeddings = F.dropout(embeddings, p=self.dropout, training=self.training)
         
-        # Apply softmax for classification
-        predictions = F.log_softmax(h, dim=1)
+        # Dense layer for classification
+        predictions = self.classifier(embeddings)
+        predictions = F.log_softmax(predictions, dim=1)
         
         return embeddings, predictions
     
@@ -198,39 +202,62 @@ class GATModel(BaseGNNModel):
         if not self.training:
             return edge_index
             
-        # Get unique nodes (both sources and targets)
-        nodes = torch.unique(edge_index)
+        # Get unique source and target nodes
+        source_nodes = torch.unique(edge_index[0])
+        target_nodes = torch.unique(edge_index[1])
+        all_nodes = torch.unique(torch.cat([source_nodes, target_nodes]))
         
-        # Pre-allocate tensors for efficiency
-        max_edges = len(nodes) * num_neighbors
-        new_edges = torch.zeros((2, max_edges), dtype=edge_index.dtype, device=edge_index.device)
-        edge_count = 0
+        new_edges_list = []
         
-        for node in nodes:
-            # Get both incoming and outgoing edges
-            mask = (edge_index[0] == node) | (edge_index[1] == node)
-            neighbors = torch.cat([
-                edge_index[1][edge_index[0] == node],  # outgoing neighbors
-                edge_index[0][edge_index[1] == node]   # incoming neighbors
-            ])
+        for node in all_nodes:
+            # Get neighbors (both incoming and outgoing)
+            outgoing_mask = edge_index[0] == node
+            incoming_mask = edge_index[1] == node
             
-            # Sample if we have more neighbors than needed
-            if len(neighbors) > num_neighbors:
+            outgoing_neighbors = edge_index[1][outgoing_mask]
+            incoming_neighbors = edge_index[0][incoming_mask]
+            
+            # Combine and get unique neighbors (handle empty tensors)
+            if len(outgoing_neighbors) > 0 and len(incoming_neighbors) > 0:
+                neighbors = torch.unique(torch.cat([outgoing_neighbors, incoming_neighbors]))
+            elif len(outgoing_neighbors) > 0:
+                neighbors = torch.unique(outgoing_neighbors)
+            elif len(incoming_neighbors) > 0:
+                neighbors = torch.unique(incoming_neighbors)
+            else:
+                continue  # No neighbors found
+            
+            # Remove self-loops if present
+            neighbors = neighbors[neighbors != node]
+            
+            if len(neighbors) == 0:
+                # If no neighbors, skip this node
+                continue
+            elif len(neighbors) >= num_neighbors:
+                # Sample without replacement
                 indices = torch.randperm(len(neighbors))[:num_neighbors]
-                neighbors = neighbors[indices]
-            elif len(neighbors) < num_neighbors:
+                sampled_neighbors = neighbors[indices]
+            else:
                 # Sample with replacement if we don't have enough neighbors
                 indices = torch.randint(0, len(neighbors), (num_neighbors,))
-                neighbors = neighbors[indices]
+                sampled_neighbors = neighbors[indices]
             
-            # Add edges to new edge index
-            for neighbor in neighbors:
-                new_edges[0, edge_count] = node
-                new_edges[1, edge_count] = neighbor
-                edge_count += 1
+            # Create edges in both directions to maintain graph structure
+            for neighbor in sampled_neighbors:
+                new_edges_list.append([node.item(), neighbor.item()])
+                new_edges_list.append([neighbor.item(), node.item()])
         
-        # Trim the tensor to actual size
-        return new_edges[:, :edge_count]
+        if len(new_edges_list) == 0:
+            # Return original edge_index if no sampling was possible
+            return edge_index
+            
+        # Convert to tensor and transpose to get proper shape [2, num_edges]
+        new_edges = torch.tensor(new_edges_list, dtype=edge_index.dtype, device=edge_index.device).t()
+        
+        # Remove duplicate edges
+        new_edges = torch.unique(new_edges, dim=1)
+        
+        return new_edges
 
 class GINModel(BaseGNNModel):
     """
@@ -245,7 +272,7 @@ class GINModel(BaseGNNModel):
             in_feats: Input feature dimension
             h_feats: Hidden feature dimension
             out_feats: Output feature dimension
-            num_layers: Number of GIN layers (default: 3 as per paper)
+            num_layers: Number of GIN layers 
             dropout: Dropout probability
             name: Name of the model
         """
@@ -265,16 +292,20 @@ class GINModel(BaseGNNModel):
             nn.Linear(h_feats, h_feats)
         )
         
+        # Final MLP for embeddings 
         self.mlp3 = nn.Sequential(
             nn.Linear(h_feats, h_feats),
             nn.ReLU(),
-            nn.Linear(h_feats, out_feats)
+            nn.Linear(h_feats, h_feats)
         )
         
         # Graph convolution layers
         self.gin1 = GINConv(self.mlp1)
         self.gin2 = GINConv(self.mlp2)
         self.gin3 = GINConv(self.mlp3)
+        
+        # Dense layer for classification
+        self.classifier = nn.Linear(h_feats, out_feats)
     
     def forward(self, data):
         """
@@ -288,7 +319,7 @@ class GINModel(BaseGNNModel):
         """
         x, edge_index = data.x, data.edge_index
         
-        # Sample neighbors for each layer, fixed at 10 as per paper
+        # Sample neighbors for each layer, fixed at 10 
         edge_index1 = self._sample_neighbors(edge_index, 10)
         edge_index2 = self._sample_neighbors(edge_index, 10)
         edge_index3 = self._sample_neighbors(edge_index, 10)
@@ -303,13 +334,14 @@ class GINModel(BaseGNNModel):
         h = F.relu(h)
         h = F.dropout(h, p=self.dropout, training=self.training)
         
-        # Store embeddings 
-        embeddings = h
-        # Third GIN layer
-        h = self.gin3(h, edge_index3)
+        # Third GIN layer 
+        embeddings = self.gin3(h, edge_index3)
+        embeddings = F.relu(embeddings)
+        embeddings = F.dropout(embeddings, p=self.dropout, training=self.training)
         
-        # Apply softmax for classification
-        predictions = F.log_softmax(h, dim=1)
+        # Dense layer for classification
+        predictions = self.classifier(embeddings)
+        predictions = F.log_softmax(predictions, dim=1)
         
         return embeddings, predictions
     
@@ -327,39 +359,61 @@ class GINModel(BaseGNNModel):
         if not self.training:
             return edge_index
             
-        # Get unique nodes (both sources and targets)
-        nodes = torch.unique(edge_index)
+        # Get unique source and target nodes
+        source_nodes = torch.unique(edge_index[0])
+        target_nodes = torch.unique(edge_index[1])
+        all_nodes = torch.unique(torch.cat([source_nodes, target_nodes]))
         
-        # Pre-allocate tensors for efficiency
-        max_edges = len(nodes) * num_neighbors
-        new_edges = torch.zeros((2, max_edges), dtype=edge_index.dtype, device=edge_index.device)
-        edge_count = 0
+        new_edges_list = []
         
-        for node in nodes:
-            # Get both incoming and outgoing edges
-            mask = (edge_index[0] == node) | (edge_index[1] == node)
-            neighbors = torch.cat([
-                edge_index[1][edge_index[0] == node],  # outgoing neighbors
-                edge_index[0][edge_index[1] == node]   # incoming neighbors
-            ])
+        for node in all_nodes:
+            # Get neighbors (both incoming and outgoing)
+            outgoing_mask = edge_index[0] == node
+            incoming_mask = edge_index[1] == node
             
-            # Sample if we have more neighbors than needed
-            if len(neighbors) > num_neighbors:
+            outgoing_neighbors = edge_index[1][outgoing_mask]
+            incoming_neighbors = edge_index[0][incoming_mask]
+            
+            # Combine and get unique neighbors (handle empty tensors)
+            if len(outgoing_neighbors) > 0 and len(incoming_neighbors) > 0:
+                neighbors = torch.unique(torch.cat([outgoing_neighbors, incoming_neighbors]))
+            elif len(outgoing_neighbors) > 0:
+                neighbors = torch.unique(outgoing_neighbors)
+            elif len(incoming_neighbors) > 0:
+                neighbors = torch.unique(incoming_neighbors)
+            else:
+                continue  # No neighbors found
+            
+            # Remove self-loops if present
+            neighbors = neighbors[neighbors != node]
+            
+            if len(neighbors) == 0:
+                # If no neighbors, skip this node
+                continue
+            elif len(neighbors) >= num_neighbors:
+                # Sample without replacement
                 indices = torch.randperm(len(neighbors))[:num_neighbors]
-                neighbors = neighbors[indices]
-            elif len(neighbors) < num_neighbors:
+                sampled_neighbors = neighbors[indices]
+            else:
                 # Sample with replacement if we don't have enough neighbors
                 indices = torch.randint(0, len(neighbors), (num_neighbors,))
-                neighbors = neighbors[indices]
+                sampled_neighbors = neighbors[indices]
             
-            # Add edges to new edge index
-            for neighbor in neighbors:
-                new_edges[0, edge_count] = node
-                new_edges[1, edge_count] = neighbor
-                edge_count += 1
+            # Create edges in both directions to maintain graph structure
+            for neighbor in sampled_neighbors:
+                new_edges_list.append([node.item(), neighbor.item()])
+                new_edges_list.append([neighbor.item(), node.item()])
         
-        # Trim the tensor to actual size
-        return new_edges[:, :edge_count]
+        if len(new_edges_list) == 0:
+            # Return original edge_index if no sampling was possible
+            return edge_index
+            
+        # Convert to tensor and transpose to get proper shape [2, num_edges]
+        new_edges = torch.tensor(new_edges_list, dtype=edge_index.dtype, device=edge_index.device).t()
+        
+        new_edges = torch.unique(new_edges, dim=1)
+        
+        return new_edges
 
 class GraphSAGEModel(BaseGNNModel):
     """
@@ -374,18 +428,19 @@ class GraphSAGEModel(BaseGNNModel):
             in_feats: Input feature dimension
             h_feats: Hidden feature dimension
             out_feats: Output feature dimension
-            num_layers: Number of GraphSAGE layers (default: 2 as per paper)
-            dropout: Dropout probability (default: 0.5 as per paper)
-            aggregator_type: Aggregator type (default: 'mean' as per paper)
+            num_layers: Number of GraphSAGE layers
+            dropout: Dropout probability
+            aggregator_type: Aggregator type
             name: Name of the model
         """
         super(GraphSAGEModel, self).__init__(in_feats, h_feats, out_feats, dropout, name)
         self.num_layers = num_layers
         self.aggregator_type = aggregator_type
         
-        # GraphSAGE layers - 2-layer model as per paper
         self.sage1 = SAGEConv(in_feats, h_feats, normalize=True, aggr=aggregator_type)
-        self.sage2 = SAGEConv(h_feats, out_feats, normalize=True, aggr=aggregator_type)
+        self.sage2 = SAGEConv(h_feats, h_feats, normalize=True, aggr=aggregator_type)
+        
+        self.classifier = nn.Linear(h_feats, out_feats)
     
     def forward(self, data):
         """
@@ -399,22 +454,22 @@ class GraphSAGEModel(BaseGNNModel):
         """
         x, edge_index = data.x, data.edge_index
         
-        # Sample neighbors for each layer with sizes specified in the paper
-        edge_index1 = self._sample_neighbors(edge_index, 25)  # First layer: 25 neighbors as per paper
-        edge_index2 = self._sample_neighbors(edge_index, 10)  # Second layer: 10 neighbors as per paper
+        edge_index1 = self._sample_neighbors(edge_index, 25)
+        edge_index2 = self._sample_neighbors(edge_index, 10)
         
         # First GraphSAGE layer
         h = self.sage1(x, edge_index1)
         h = F.relu(h)
         h = F.dropout(h, p=self.dropout, training=self.training)
         
-        # Store embeddings 
-        embeddings = h
-        # Second GraphSAGE layer
-        h = self.sage2(h, edge_index2)
-
-        # Apply softmax for classification
-        predictions = F.log_softmax(h, dim=1)
+        # Second GraphSAGE layer (last hidden layer)
+        embeddings = self.sage2(h, edge_index2)
+        embeddings = F.relu(embeddings)
+        embeddings = F.dropout(embeddings, p=self.dropout, training=self.training)
+        
+        # Dense layer for classification
+        predictions = self.classifier(embeddings)
+        predictions = F.log_softmax(predictions, dim=1)
         
         return embeddings, predictions
     
@@ -432,43 +487,66 @@ class GraphSAGEModel(BaseGNNModel):
         if not self.training:
             return edge_index
             
-        # Get unique nodes (both sources and targets)
-        nodes = torch.unique(edge_index)
+        # Get unique source and target nodes
+        source_nodes = torch.unique(edge_index[0])
+        target_nodes = torch.unique(edge_index[1])
+        all_nodes = torch.unique(torch.cat([source_nodes, target_nodes]))
         
-        # Pre-allocate tensors for efficiency
-        max_edges = len(nodes) * num_neighbors
-        new_edges = torch.zeros((2, max_edges), dtype=edge_index.dtype, device=edge_index.device)
-        edge_count = 0
+        new_edges_list = []
         
-        for node in nodes:
-            # Get both incoming and outgoing edges
-            mask = (edge_index[0] == node) | (edge_index[1] == node)
-            neighbors = torch.cat([
-                edge_index[1][edge_index[0] == node],  # outgoing neighbors
-                edge_index[0][edge_index[1] == node]   # incoming neighbors
-            ])
+        for node in all_nodes:
+            # Get neighbors (both incoming and outgoing)
+            outgoing_mask = edge_index[0] == node
+            incoming_mask = edge_index[1] == node
             
-            # Sample if we have more neighbors than needed
-            if len(neighbors) > num_neighbors:
+            outgoing_neighbors = edge_index[1][outgoing_mask]
+            incoming_neighbors = edge_index[0][incoming_mask]
+            
+            # Combine and get unique neighbors (handle empty tensors)
+            if len(outgoing_neighbors) > 0 and len(incoming_neighbors) > 0:
+                neighbors = torch.unique(torch.cat([outgoing_neighbors, incoming_neighbors]))
+            elif len(outgoing_neighbors) > 0:
+                neighbors = torch.unique(outgoing_neighbors)
+            elif len(incoming_neighbors) > 0:
+                neighbors = torch.unique(incoming_neighbors)
+            else:
+                continue  # No neighbors found
+            
+            # Remove self-loops if present
+            neighbors = neighbors[neighbors != node]
+            
+            if len(neighbors) == 0:
+                # If no neighbors, skip this node
+                continue
+            elif len(neighbors) >= num_neighbors:
+                # Sample without replacement
                 indices = torch.randperm(len(neighbors))[:num_neighbors]
-                neighbors = neighbors[indices]
-            elif len(neighbors) < num_neighbors:
+                sampled_neighbors = neighbors[indices]
+            else:
                 # Sample with replacement if we don't have enough neighbors
                 indices = torch.randint(0, len(neighbors), (num_neighbors,))
-                neighbors = neighbors[indices]
+                sampled_neighbors = neighbors[indices]
             
-            # Add edges to new edge index
-            for neighbor in neighbors:
-                new_edges[0, edge_count] = node
-                new_edges[1, edge_count] = neighbor
-                edge_count += 1
+            # Create edges in both directions to maintain graph structure
+            for neighbor in sampled_neighbors:
+                new_edges_list.append([node.item(), neighbor.item()])
+                new_edges_list.append([neighbor.item(), node.item()])
         
-        # Trim the tensor to actual size
-        return new_edges[:, :edge_count]
+        if len(new_edges_list) == 0:
+            # Return original edge_index if no sampling was possible
+            return edge_index
+            
+        # Convert to tensor and transpose to get proper shape [2, num_edges]
+        new_edges = torch.tensor(new_edges_list, dtype=edge_index.dtype, device=edge_index.device).t()
+        
+        # Remove duplicate edges
+        new_edges = torch.unique(new_edges, dim=1)
+        
+        return new_edges
 
 class GNNModel(BaseGNNModel):
     """
-    GNN model.
+    GNN model wrapper.
     """
     def __init__(self, model_type, in_feats, h_feats, out_feats, num_features=None, num_classes=None, dropout=0.5, num_heads=4, num_layers=None, name=None):
         """
@@ -496,21 +574,23 @@ class GNNModel(BaseGNNModel):
         super(GNNModel, self).__init__(in_feats, h_feats, out_feats, dropout, name)
         
         self.model_type = model_type.lower()
+        self.num_heads = num_heads
+        self.num_layers = num_layers
         
-        # Set default num_layers based on model type (as per paper)
+        # Set default num_layers based on model type 
         if num_layers is None:
             if self.model_type in ['gat', 'gin']:
-                num_layers = 3
+                self.num_layers = 3
             elif self.model_type == 'sage':
-                num_layers = 2
+                self.num_layers = 2
         
         # Initialize the appropriate model based on model_type
         if self.model_type == 'gat':
-            self.model = GATModel(in_feats, h_feats, out_feats, num_heads=num_heads, num_layers=num_layers, dropout=dropout, name=name)
+            self.model = GATModel(in_feats, h_feats, out_feats, num_heads=num_heads, num_layers=self.num_layers, dropout=dropout, name=name)
         elif self.model_type == 'gin':
-            self.model = GINModel(in_feats, h_feats, out_feats, num_layers=num_layers, dropout=dropout, name=name)
+            self.model = GINModel(in_feats, h_feats, out_feats, num_layers=self.num_layers, dropout=dropout, name=name)
         elif self.model_type == 'sage':
-            self.model = GraphSAGEModel(in_feats, h_feats, out_feats, num_layers=num_layers, dropout=dropout, name=name)
+            self.model = GraphSAGEModel(in_feats, h_feats, out_feats, num_layers=self.num_layers, dropout=dropout, name=name)
         else:
             raise ValueError(f"Unknown model type: {model_type}")
     
@@ -525,5 +605,61 @@ class GNNModel(BaseGNNModel):
             Node embeddings and predictions
         """
         return self.model(data)
+    
+    def save(self, path):
+        """
+        Save model to disk.
+        
+        Args:
+            path: Path to save the model
+        """
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        
+        # Save model state with wrapper metadata
+        torch.save({
+            'model_state_dict': self.model.state_dict(),
+            'model_type': self.model_type,
+            'in_feats': self.in_feats,
+            'h_feats': self.h_feats,
+            'out_feats': self.out_feats,
+            'dropout': self.dropout,
+            'num_heads': self.num_heads,
+            'num_layers': self.num_layers,
+            'name': self.name
+        }, path)
+        
+    @classmethod
+    def load(cls, path, device=None):
+        """
+        Load model from disk.
+        
+        Args:
+            path: Path to load the model from
+            device: Device to load the model to
+            
+        Returns:
+            Loaded model
+        """
+        if device is None:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        checkpoint = torch.load(path, map_location=device)
+        
+        model = cls(
+            model_type=checkpoint['model_type'],
+            in_feats=checkpoint['in_feats'],
+            h_feats=checkpoint['h_feats'],
+            out_feats=checkpoint['out_feats'],
+            dropout=checkpoint['dropout'],
+            num_heads=checkpoint.get('num_heads', 4),
+            num_layers=checkpoint.get('num_layers'),
+            name=checkpoint.get('name')
+        )
+        
+        model.model.load_state_dict(checkpoint['model_state_dict'])
+        model.to(device)
+        
+        return model
 
 
