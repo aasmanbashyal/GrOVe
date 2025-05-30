@@ -33,11 +33,11 @@ class GraphDataProcessor:
             node_labels: Node labels tensor
             overlapped: Whether to use overlapped splits (default False).
             
-        Non-overlapped (default):
-            target_train: 40% of nodes
-            surrogate_train: 40% (disjoint)
-            test: 10%
-            verification: 10%
+        Non-overlapped (updated for model stealing):
+            clean_train: 40% of nodes (used for training target and independent models)
+            query_train: 40% of nodes (used for querying target to get surrogate training data)
+            test: 10% of nodes (for final testing)
+            validation: 10% of nodes (for validation during training)
             
         Overlapped:
             target_train: 45% of nodes
@@ -65,32 +65,56 @@ class GraphDataProcessor:
             test_indices = indices[val_size: val_size + test_size]
             target_indices = indices[val_size + test_size: val_size + test_size + target_size]
             surrogate_indices = target_indices[:surrogate_size]
-        else:
-            # Non-overlapped splits: target (40%), surrogate (40%), test (10%), verification (10%)
-            target_size = int(num_nodes * 0.4)
-            surrogate_size = int(num_nodes * 0.4)
-            test_size = int(num_nodes * 0.1)
             
-            target_indices = indices[:target_size]
-            surrogate_indices = indices[target_size: target_size + surrogate_size]
-            test_indices = indices[target_size + surrogate_size: target_size + surrogate_size + test_size]
-            verification_indices = indices[target_size + surrogate_size + test_size:]
-        
-        # Create subgraphs for each split
-        splits = {
-            'target_train': self._create_subgraph(graph, target_indices),
-            'surrogate_train': self._create_subgraph(graph, surrogate_indices),
-            'test': self._create_subgraph(graph, test_indices),
-            'verification': self._create_subgraph(graph, verification_indices)
-        }
-        
-        # Store indices for reference
-        splits['indices'] = {
-            'target_train': target_indices,
-            'surrogate_train': surrogate_indices,
-            'test': test_indices,
-            'verification': verification_indices
-        }
+            # Create subgraphs for overlapped splits (keep existing naming for compatibility)
+            splits = {
+                'target_train': self._create_subgraph(graph, target_indices),
+                'surrogate_train': self._create_subgraph(graph, surrogate_indices),
+                'test': self._create_subgraph(graph, test_indices),
+                'verification': self._create_subgraph(graph, verification_indices)
+            }
+            
+            # Store indices for reference
+            splits['indices'] = {
+                'target_train': target_indices,
+                'surrogate_train': surrogate_indices,
+                'test': test_indices,
+                'verification': verification_indices
+            }
+        else:
+            # Non-overlapped splits for model stealing: clean (40%), query (40%), test (10%), validation (10%)
+            clean_size = int(num_nodes * 0.4)    # For training target and independent models
+            query_size = int(num_nodes * 0.4)    # For querying target model to get surrogate data
+            test_size = int(num_nodes * 0.1)     # For final evaluation
+            val_size = num_nodes - clean_size - query_size - test_size  # Remaining ~10% for validation
+            
+            clean_indices = indices[:clean_size]
+            query_indices = indices[clean_size: clean_size + query_size]
+            test_indices = indices[clean_size + query_size: clean_size + query_size + test_size]
+            validation_indices = indices[clean_size + query_size + test_size:]
+            
+            # Create subgraphs for non-overlapped splits
+            splits = {
+                'target_train': self._create_subgraph(graph, clean_indices),
+                'independent_train': self._create_subgraph(graph, clean_indices),
+                'query_train': self._create_subgraph(graph, query_indices),
+                'test': self._create_subgraph(graph, test_indices),
+                'validation': self._create_subgraph(graph, validation_indices)
+            }
+            
+            # Store indices for reference
+            splits['indices'] = {
+                'target_train': clean_indices,
+                'independent_train': clean_indices,  # Same as target but will use different seed
+                'query_train': query_indices,
+                'test': test_indices,
+                'validation': validation_indices
+            }
+            
+            splits['surrogate_train'] = splits['query_train']
+            splits['verification'] = splits['validation']
+            splits['indices']['surrogate_train'] = query_indices
+            splits['indices']['verification'] = validation_indices
         
         return splits
     
