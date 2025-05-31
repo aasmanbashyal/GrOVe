@@ -361,7 +361,39 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
     final_val_accuracy = final_val_correct / final_val_total if final_val_total > 0 else 0
     
     final_verification_embeddings = torch.cat(final_verification_embeddings, dim=0).cpu()
-    
+
+    # Save metrics to CSV file in model dir
+    import pandas as pd
+
+    from datetime import datetime
+
+    # Prepare metrics dictionary
+    metrics = {
+        'final_train_acc': final_train_accuracy,
+        'final_val_acc': final_val_accuracy,
+        'epochs': epochs,
+        'hidden_dim': hidden_dim,
+        'model_role': model_role,
+        'model_name': model_name,
+        'dataset': dataset_name,
+        'split_type': split_type,
+        'timestamp': datetime.now().isoformat()
+    }
+
+    # Compose CSV file path
+    metrics_csv_path = Path(output_dir) / f"{model_name}_{dataset_name}_{model_role}_{split_type}_metrics.csv"
+
+    # If file exists, append; else, create with header
+    try:
+        df_existing = pd.read_csv(metrics_csv_path)
+        df_new = pd.DataFrame([metrics])
+        df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+        df_combined.to_csv(metrics_csv_path, index=False)
+    except Exception:
+        # File does not exist or is unreadable, create new
+        df_new = pd.DataFrame([metrics])
+        df_new.to_csv(metrics_csv_path, index=False)
+
     # Print training summary
     print("\nTraining Summary:")
     print(f"Best validation loss: {best_val_loss:.4f} at epoch {best_epoch+1}")
