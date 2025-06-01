@@ -327,9 +327,9 @@ class IDGLReconstructor:
         learned_adj_np = raw_adj.detach().cpu().numpy()
         
         if self.threshold_type == 'adaptive':
-            if dataset_name in ['acm', 'amazon_cs']:
+            if dataset_name in ['acm', 'amazon']:
                 binary_adj = (learned_adj_np > 0.9).astype(np.int32)
-            elif dataset_name in ['coauthor_phy']:
+            elif dataset_name in ['coauthor']:
                 binary_adj = (learned_adj_np >= 0.999).astype(np.int32)
             else:
                 binary_adj = (learned_adj_np > 0.999).astype(np.int32)

@@ -272,7 +272,7 @@ class SurrogateModelTrainer:
     
     def _train_detached_classifier(self, embeddings: torch.Tensor, labels: torch.Tensor) -> MLPClassifier:
         """
-        Train a detached classifier on embeddings (following oldgrove approach).
+        Train a detached classifier on embeddings.
         
         Args:
             embeddings: Node embeddings
@@ -483,6 +483,18 @@ class SurrogateModelTrainer:
         results['final_test_acc'] = final_test_acc
         
         return results
+    
+    def evaluate_surrogate(self, data: Data) -> float:
+        """
+        Public method to evaluate surrogate model on data.
+        
+        Args:
+            data: Data to evaluate on
+            
+        Returns:
+            Accuracy
+        """
+        return self._evaluate_surrogate(data)
     
     def _evaluate_surrogate(self, data: Data) -> float:
         """

@@ -4,3 +4,7 @@ __pycache__
 *.pyd
 *.pyw
 *.pyz
+oldgrove
+docs
+deleteme*
+old_visualizations*

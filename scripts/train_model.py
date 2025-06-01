@@ -65,7 +65,7 @@ def shuffle_data(data, seed):
 
 def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, device='cuda', epochs=200, lr=0.001, 
                 batch_size=32, hidden_dim=256, dropout=0.5, early_stopping=10, 
-                seed=42, model_role='target', split_type='non-overlapped'):
+                seed=42, model_role='target', independent_model='gat', split_type='non-overlapped'):
     
     
     # Set random seed for reproducibility
@@ -379,9 +379,10 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
         'split_type': split_type,
         'timestamp': datetime.now().isoformat()
     }
-
-    # Compose CSV file path
-    metrics_csv_path = Path(output_dir) / f"{model_name}_{dataset_name}_{model_role}_{split_type}_metrics.csv"
+    if model_role == 'independent':
+        metrics_csv_path = Path(output_dir) / f"{model_name}_{dataset_name}_{model_role}_{split_type}_{independent_model}_metrics.csv"
+    else:
+        metrics_csv_path = Path(output_dir) / f"{model_name}_{dataset_name}_{model_role}_{split_type}_metrics.csv"
 
     # If file exists, append; else, create with header
     try:
@@ -416,7 +417,10 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
             embeddings_path = output_path
         
         # Save model
-        model_save_path = output_path / f"{model_name}_{dataset_name}_{model_role}_{split_type}.pt"
+        if model_role == 'independent':
+            model_save_path = output_path / f"{model_name}_{dataset_name}_{model_role}_{independent_model}_{split_type}.pt"
+        else:   
+            model_save_path = output_path / f"{model_name}_{dataset_name}_{model_role}_{split_type}.pt"
         torch.save({
             'model_state_dict': best_model_state,
             'model_config': {
@@ -438,7 +442,10 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
         print(f"Model saved to {model_save_path}")
         
         # Save verification embeddings only
-        embeddings_save_path = embeddings_path / f"{model_name}_{dataset_name}_{model_role}.pt"
+        if model_role == 'independent':
+            embeddings_save_path = embeddings_path / f"{model_name}_{dataset_name}_{model_role}_{independent_model}.pt"
+        else:       
+            embeddings_save_path = embeddings_path / f"{model_name}_{dataset_name}_{model_role}.pt"
         
         # Create Data objects for verification embeddings
         best_verification_data = Data(
@@ -484,9 +491,10 @@ def main():
     parser.add_argument("--early-stopping", type=int, default=10, help="Early stopping patience (default: 10)")
     parser.add_argument("--seed", type=int, default=42, help="Model seed")
     parser.add_argument("--model-role", type=str, default="target", choices=["target", "independent", "surrogate"], help="Model role (default: target)")
+    parser.add_argument('--independent-model', type=str, default='gat', choices=['gat', 'gin', 'sage'], help='Model For Independent Training')
     parser.add_argument("--split-type", type=str, default="non-overlapped", choices=["non-overlapped", "overlapped"], help="Split type (default: non-overlapped)")
     args = parser.parse_args()
-    train_model(args.model, args.dataset, args.output_dir, args.embeddings_dir, args.device, args.epochs, args.lr, args.batch_size, args.hidden_dim, args.dropout, args.early_stopping, args.seed, args.model_role, args.split_type)
+    train_model(args.model, args.dataset, args.output_dir, args.embeddings_dir, args.device, args.epochs, args.lr, args.batch_size, args.hidden_dim, args.dropout, args.early_stopping, args.seed, args.model_role, args.independent_model, args.split_type)
 
 if __name__ == '__main__':
     main()
