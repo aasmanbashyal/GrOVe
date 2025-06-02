@@ -1,186 +1,133 @@
 #!/bin/bash
 
 echo "Starting application..."
+# echo "Available GPUs (according to nvidia-smi):"
+# nvidia-smi || echo "nvidia-smi not found or no GPU detected by it."
 
 dataset="citeseer" 
+dataset_list=("citeseer" "acm" "dblp" "coauthor" "pubmed" "amazon")
 device="cuda"     
 model="gat"
+model_list=("gat" "gin" "sage")
+independent_model_list=("gat" "gin" "sage")
 split_type="non-overlapped"  
 epochs=200
-batch_size=1024
 
-# Create necessary directories
-echo "Creating necessary directories..."
-mkdir -p /app/test_csim/embeddings/${split_type}/${model}_${dataset}
-mkdir -p /app/test_csim/saved_models/${split_type}/${model}_${dataset}
-mkdir -p /app/test_csim/models/csim
+for dataset in "${dataset_list[@]}"; do
+    for model in "${model_list[@]}"; do
+        # Create necessary directories
+        echo "Creating directories..."
+        mkdir -p /app/data/processed/${split_type}/${dataset}
+        mkdir -p /app/saved_models/${split_type}/${model}_${dataset}
+        mkdir -p /app/embeddings/${split_type}/${model}_${dataset}
+        mkdir -p /app/new_visualizations/${split_type}/${model}_${dataset}
+        # mkdir -p /app/models/csim
 
-mkdir -p /app/test_advance/embeddings/${split_type}/${model}_${dataset}_01
-mkdir -p /app/test_advance/saved_models/${split_type}/${model}_${dataset}_01
+        echo "Preprocessing data..."
+        python3 /app/scripts/preprocess_data.py --dataset ${dataset} --overlapped false --output-dir /app/data/processed/${split_type}/${dataset}
 
-mkdir -p /app/test_advance/new_visualizations/${split_type}/${model}_${dataset}
-mkdir -p /app/test_advance/new_visualizations/${split_type}/${model}_${dataset}_07_M
+        echo ""
+        echo "================================================"
+        echo "TRAINING TARGET MODEL (${model} on ${dataset})"
+        echo "================================================"
+        python3 /app/scripts/train_model.py --model ${model} --dataset ${dataset} --output-dir /app/saved_models/${split_type}/${model}_${dataset} --embeddings-dir /app/embeddings/${split_type}/${model}_${dataset} --device ${device} --epochs ${epochs} --model-role target --split-type ${split_type} --seed 42
 
-# echo ""
-# echo "================================================"
-# echo "CSIM sample data preparation independent model"
-# echo "================================================"
+        echo ""
+        echo "================================================"
+        echo "TRAINING INDEPENDENT MODELS (${dataset})"
+        echo "================================================"
 
-INDEPENDENT_EMBEDDING="/app/test_csim/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_independent_${model}.pt"
+        for independent_model in ${independent_model_list[@]}; do
+            python3 /app/scripts/train_model.py --model ${model} --dataset ${dataset} --output-dir /app/saved_models/${split_type}/${model}_${dataset} --embeddings-dir /app/embeddings/${split_type}/${model}_${dataset} --device ${device} --epochs ${epochs} --model-role independent --independent-model ${independent_model} --split-type ${split_type} --seed 789
+        done
 
-# python3 /app/scripts/train_model.py \
-#     --model ${model} \
-#     --dataset ${dataset} \
-#     --output-dir /app/test_csim/saved_models/${split_type}/${model}_${dataset} \
-#     --embeddings-dir /app/test_csim/embeddings/${split_type}/${model}_${dataset} \
-#     --device ${device} \
-#     --epochs ${epochs} \
-#     --batch-size ${batch_size} \
-#     --model-role independent \
-#     --independent-model ${model} \
-#     --split-type ${split_type} \
-#     --seed 789
-# echo ""
-# echo "================================================"
-# echo "CSIM sample data preparation surrogate model"
-# echo "================================================"
 
-TARGET_MODEL_PATH="/app/saved_models/${split_type}/${model}_${dataset}/${model}_${dataset}_target_${split_type}.pt"
+        echo ""
+        echo "================================================"
+        echo "TRAINING MODEL STEALING SURROGATE (${model} on ${dataset})"
+        echo "================================================"
 
-python3 /app/scripts/train_stealing_surrogate_advance.py \
-    --target-model-path "$TARGET_MODEL_PATH" \
-    --model ${model} \
-    --dataset ${dataset} \
-    --split-type ${split_type} \
-    --output-dir "/app/test_advance/saved_models/${split_type}/${model}_${dataset}_02" \
-    --embeddings-dir "/app/test_advance/embeddings/${split_type}/${model}_${dataset}_02" \
-    --surrogate-architecture ${model} \
-    --recovery-from embedding \
-    --structure original \
-    --epochs 200 \
-    --device ${device} \
-    --seed 224 \
-    --advanced-attack pruning \
-    --pruning-ratio 0.2 \
-    --save-detailed-metrics
+        # Path to trained target model
+        TARGET_MODEL_PATH="/app/saved_models/${split_type}/${model}_${dataset}/${model}_${dataset}_target_${split_type}.pt"
+        echo "Target model path: ${TARGET_MODEL_PATH}"
 
-python3 /app/scripts/visualize_embeddings.py \
-    --embeddings-path \
-       "/app/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_target.pt" \
-       "/app/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_independent_${model}.pt" \
-       "/app/test_advance/embeddings/${split_type}/${model}_${dataset}_02/${model}_${dataset}_surrogate_original_pruning.pt" \
-    --output-dir "/app/test_advance/new_visualizations/${split_type}/${model}_${dataset}_02" \
-    --combined
+        # Check if target model exists
+        if [ -f "$TARGET_MODEL_PATH" ]; then
+            echo "✅ Target model found, proceeding with model stealing attacks..."
+            
+            echo ""
+            echo "================================================"
+            echo "TYPE I ATTACK (Original Structure)"
+            echo "================================================"
+            
+            # Type I attack: Use original graph structure
+            echo "Running Type I attack with original graph structure..."
+            python3 /app/scripts/train_stealing_surrogate.py \
+                --target-model-path "$TARGET_MODEL_PATH" \
+                --model ${model} \
+                --dataset ${dataset} \
+                --split-type ${split_type} \
+                --output-dir "/app/saved_models/${split_type}/${model}_${dataset}" \
+                --embeddings-dir "/app/embeddings/${split_type}/${model}_${dataset}" \
+                --surrogate-architecture ${model} \
+                --recovery-from embedding \
+                --structure original \
+                --epochs ${epochs} \
+                --device ${device} \
+                --save-detailed-metrics
+                
+            echo "✅ Type I attack completed!"
+            echo "Results saved in: /app/saved_models/${split_type}/${model}_${dataset}"
+            
+            echo ""
+            echo "================================================"
+            echo "TYPE II ATTACK (IDGL Reconstructed Structure)"
+            echo "================================================"
+            
+            # Type II attack: Use IDGL reconstructed graph structure
+            echo "Running Type II attack with IDGL reconstructed structure..."
+            python3 /app/scripts/train_stealing_surrogate.py \
+                --target-model-path "$TARGET_MODEL_PATH" \
+                --model ${model} \
+                --dataset ${dataset} \
+                --split-type ${split_type} \
+                --output-dir "/app/saved_models/${split_type}/${model}_${dataset}" \
+                --embeddings-dir "/app/embeddings/${split_type}/${model}_${dataset}" \
+                --surrogate-architecture ${model} \
+                --recovery-from embedding \
+                --structure idgl \
+                --epochs ${epochs} \
+                --device ${device} \
+                --save-detailed-metrics
 
-# python3 /app/scripts/train_stealing_surrogate_advance.py \
-#     --target-model-path "$TARGET_MODEL_PATH" \
-#     --model ${model} \
-#     --dataset ${dataset} \
-#     --split-type ${split_type} \
-#     --output-dir "/app/test_advance/saved_models/${split_type}/${model}_${dataset}_05" \
-#     --embeddings-dir "/app/test_advance/embeddings/${split_type}/${model}_${dataset}_05" \
-#     --surrogate-architecture ${model} \
-#     --recovery-from embedding \
-#     --structure original \
-#     --epochs 200 \
-#     --device ${device} \
-#     --seed 224 \
-#     --advanced-attack pruning \
-#     --pruning-ratio 0.5 \
-#     --save-detailed-metrics
 
-# python3 /app/scripts/visualize_embeddings.py \
-#     --embeddings-path \
-#        "/app/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_target.pt" \
-#        "/app/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_independent_${model}.pt" \
-#        "/app/test_advance/embeddings/${split_type}/${model}_${dataset}_05/${model}_${dataset}_surrogate_original_pruning.pt" \
-#     --output-dir "/app/test_advance/new_visualizations/${split_type}/${model}_${dataset}" \
-#     --combined  
+            echo "✅ Type II (IDGL) attack completed!"
+            echo "Results saved in: /app/saved_models/${split_type}/${model}_${dataset}"
 
-python3 /app/scripts/train_stealing_surrogate_advance.py \
-        --target-model-path "$TARGET_MODEL_PATH" \
-        --model ${model} \
-        --dataset ${dataset} \
-        --split-type ${split_type} \
-        --output-dir "/app/test_advance/saved_models/${split_type}/${model}_${dataset}_07" \
-        --embeddings-dir "/app/test_advance/embeddings/${split_type}/${model}_${dataset}_07" \
-        --surrogate-architecture ${model} \
-        --recovery-from embedding \
-        --structure original \
-        --epochs 200 \
-        --device ${device} \
-        --seed 224 \
-        --advanced-attack pruning \
-        --pruning-ratio 0.7 \
-        --save-detailed-metrics
+        else
+            echo "❌ Target model not found at: $TARGET_MODEL_PATH"
+            echo "Skipping model stealing attacks..."
+        fi
 
-python3 /app/scripts/visualize_embeddings.py \
-    --embeddings-path \
-       "/app/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_target.pt" \
-       "/app/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_independent_${model}.pt" \
-       "/app/test_advance/embeddings/${split_type}/${model}_${dataset}_07/${model}_${dataset}_surrogate_original_pruning.pt" \
-    --output-dir "/app/test_advance/new_visualizations/${split_type}/${model}_${dataset}_07" \
-    --combined 
-# echo ""
-# echo "================================================"
-# echo "CSIM VERIFICATION SYSTEM (EMBEDDING-BASED)"
-# echo "================================================"
 
-# # Check if embeddings exist for training Csim
-# TARGET_EMBEDDING="/app/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_target.pt"
+        echo "================================================"
 
-# if [ -f "$TARGET_EMBEDDING" ]; then
-#     # echo "🔍 Training Csim verification system from saved embeddings..."
-    
-#     # # Train Csim using saved embeddings
-#     # python3 /app/scripts/train_csim_from_embeddings.py \
-#     #     --model ${model} \
-#     #     --dataset ${dataset} \
-#     #     --split-type ${split_type} \
-#     #     --embeddings-dir "/app/embeddings" \
-#     #     --output-dir "/app/test_csim/models/csim" \
-#     #     --device ${device} \
-#     #     --use-grid-search
+        # Visualize embeddings with multiple perplexity values
+        echo "Visualizing embeddings..."
         
-#     # echo "✅ Csim training completed!"
-    
-#     # echo ""
-#     # echo "🔍 Testing ownership verification on different models..."
-    
-#     TARGET_MODEL_NAME="${model}_${dataset}_target"
-    
-#     # Test verification on surrogate models (should detect as surrogate)
-#     if [ -f "/app/test_csim/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_surrogate_original.pt" ]; then
-#         echo ""
-#         echo "--- Verifying Surrogate (Original Structure) ---"
-#         python3 /app/scripts/verify_ownership_from_embeddings.py \
-#             --target-model-name "$TARGET_MODEL_NAME" \
-#             --target-embedding "$TARGET_EMBEDDING" \
-#             --suspect-embedding "/app/test_csim/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_surrogate_original.pt" \
-#             --csim-model-dir "/app/test_csim/models/csim" \
-#             --threshold 0.5
-#     fi
-    
-#     # Test verification on independent model (should detect as independent)
-#     if [ -f "$INDEPENDENT_EMBEDDING" ]; then
-#         echo ""
-#         echo "--- Verifying Independent Model ---"
-#         python3 /app/scripts/verify_ownership_from_embeddings.py \
-#             --target-model-name "$TARGET_MODEL_NAME" \
-#             --target-embedding "$TARGET_EMBEDDING" \
-#             --suspect-embedding "$INDEPENDENT_EMBEDDING" \
-#             --csim-model-dir "/app/test_csim/models/csim" \
-#             --threshold 0.5
-#     fi
-    
-#     echo ""
-#     echo "✅ Csim verification testing completed!"
-#     echo "Results show whether each model is detected as surrogate or independent"
-# else
-#     echo "❌ Target embeddings not found at: $TARGET_EMBEDDING"
-#     echo "Skipping Csim training and verification..."
-# fi
+        # Comprehensive visualization including stolen surrogate
+        python3 /app/scripts/visualize_embeddings.py \
+            --embeddings-path \
+                "/app/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_target.pt" \
+                "/app/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_independent_${model}.pt" \
+                "/app/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_surrogate_original.pt" \
+            --output-dir "/app/new_visualizations/${split_type}/${model}_${dataset}" \
+            --combined 
+    done
+done
 
-# Comprehensive visualization including stolen surrogate
+echo "✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅"
+echo "🎉 All datasets and models processed successfully!"
 
-echo "================================================"
+
+
