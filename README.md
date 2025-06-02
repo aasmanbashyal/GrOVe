@@ -61,6 +61,55 @@ Below are t-SNE visualizations of embeddings for different models and datasets. 
 
   ![Target vs Independent vs Surrogate Distances](visualizations/non-overlapped/sage_acm/acm_tsne_per_30.png)
 
+---
+- **Fine-tuned GAT, Dataset: Citeseer**
+
+  ![Target vs Independent vs Surrogate Distances](test_advance\new_visualizations\non-overlapped\gat_citeseer_fine_tuning\citeseer_tsne_per_30.png)
+
+ - **Double Extraction Type 1 GAT, Dataset: Citeseer**
+
+  ![Target vs Independent vs Surrogate Distances](test_advance\new_visualizations\non-overlapped\gat_citeseer_double_extraction\citeseer_tsne_per_30.png) 
+
+- **Double Extraction Type 2 GAT, Dataset: Citeseer**
+
+  ![Target vs Independent vs Surrogate Distances](test_advance\new_visualizations\non-overlapped\gat_citeseer_double_extraction_type2\citeseer_tsne_per_30.png) 
+
+ - **Distribution Shift GAT, Dataset: Citeseer**
+
+  ![Target vs Independent vs Surrogate Distances](test_advance\new_visualizations\non-overlapped\gat_citeseer_distribution_shift\citeseer_tsne_per_30.png) 
+  
+---
+### Embedding visualization on different puring ratio
+
+- **Pruning Ratio: 0.1 GAT, Dataset: Citeseer**
+
+  ![Target vs Independent vs Surrogate Distances](test_advance\new_visualizations\non-overlapped\gat_citeseer_pruning_01\citeseer_tsne_per_30.png) 
+
+- **Pruning Ratio: 0.2 GAT, Dataset: Citeseer**
+
+  ![Target vs Independent vs Surrogate Distances](test_advance\new_visualizations\non-overlapped\gat_citeseer_pruning_02\citeseer_tsne_per_30.png) 
+
+- **Pruning Ratio: 0.3 GAT, Dataset: Citeseer**
+
+  ![Target vs Independent vs Surrogate Distances](test_advance\new_visualizations\non-overlapped\gat_citeseer_pruning_03\citeseer_tsne_per_30.png) 
+
+- **Pruning Ratio: 0.4 GAT, Dataset: Citeseer**
+
+  ![Target vs Independent vs Surrogate Distances](test_advance\new_visualizations\non-overlapped\gat_citeseer_pruning_04\citeseer_tsne_per_30.png) 
+
+- **Pruning Ratio: 0.5 GAT, Dataset: Citeseer**
+
+  ![Target vs Independent vs Surrogate Distances](test_advance\new_visualizations\non-overlapped\gat_citeseer_pruning_05\citeseer_tsne_per_30.png)
+
+- **Pruning Ratio: 0.6 GAT, Dataset: Citeseer**
+
+  ![Target vs Independent vs Surrogate Distances](test_advance\new_visualizations\non-overlapped\gat_citeseer_pruning_06\citeseer_tsne_per_30.png)
+
+- **Pruning Ratio: 0.7 GAT, Dataset: Citeseer**
+
+  ![Target vs Independent vs Surrogate Distances](test_advance\new_visualizations\non-overlapped\gat_citeseer_pruning_07\citeseer_tsne_per_30.png) 
+
+
 ## Citation
 
 ```bibtex
