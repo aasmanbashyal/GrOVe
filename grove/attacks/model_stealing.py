@@ -6,7 +6,6 @@ Supports Type I (original structure) and Type II (reconstructed structure) attac
 Type I Attack: Query and train on original structure
 Type II Attack: Query and train on reconstructed structure (IDGL, KNN, etc.)
 
-Based on "GrOVe: Ownership Verification of Graph Neural Networks using Embeddings"
 """
 
 import torch
@@ -20,6 +19,12 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split
 from typing import Tuple, Dict, Any, Optional, Union
 import numpy as np
+from sklearn.manifold import TSNE
+from sklearn.decomposition import PCA
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+import random
+import copy
 
 from ..models.gnn import GATModel, GINModel, GraphSAGEModel
 from .graph_reconstruction import estimate_graph_structure
@@ -337,7 +342,7 @@ class SurrogateModelTrainer:
         """
         Train surrogate model using model stealing attack.
         
-        Algorithm (matching oldgrove):
+        Algorithm :
         - Type I: Query target with ORIGINAL, train surrogate with ORIGINAL
         - Type II: Query target with RECONSTRUCTED, train surrogate with RECONSTRUCTED
         
@@ -620,6 +625,202 @@ class SurrogateModelTrainer:
         except Exception as e:
             print(f"⚠️  Failed to save models: {e}")
 
+    def fine_tune_surrogate(self, 
+                           fine_tune_data: Data,
+                           val_data: Data,
+                           test_data: Data,
+                           num_epochs: int = 50,
+                           lr: float = 0.0001,
+                           freeze_backbone: bool = True) -> Dict[str, Any]:
+        """
+        Fine-tune the already trained surrogate model on additional data.
+        
+        Args:
+            fine_tune_data: Data for fine-tuning
+            val_data: Validation data
+            test_data: Test data
+            num_epochs: Number of fine-tuning epochs
+            lr: Learning rate for fine-tuning
+            freeze_backbone: Whether to freeze backbone and only train classifier
+            
+        Returns:
+            Dictionary with fine-tuning results
+        """
+        if self.surrogate_model is None or self.classifier is None:
+            raise RuntimeError("Cannot fine-tune: surrogate model not trained yet")
+        
+        print(f"Fine-tuning surrogate model with {num_epochs} epochs...")
+        
+        # Apply structure modification to fine-tune data
+        modified_fine_tune_data = self._apply_structure_modification(fine_tune_data)
+        modified_val_data = self._apply_structure_modification(val_data)
+        modified_test_data = self._apply_structure_modification(test_data)
+        
+        # Implement fine-tuning directly without external FineTuner class
+        print("Starting fine-tuning phase...")
+        
+        # Freeze backbone if requested
+        if freeze_backbone:
+            for name, param in self.surrogate_model.named_parameters():
+                if 'classifier' not in name:  # Only keep classifier trainable
+                    param.requires_grad = False
+        
+        # Setup optimizer for fine-tuning
+        optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, list(self.surrogate_model.parameters()) + list(self.classifier.parameters())),
+            lr=lr
+        )
+        criterion = nn.CrossEntropyLoss()
+        
+        # Fine-tuning loop
+        self.surrogate_model.train()
+        self.classifier.train()
+        
+        for epoch in range(num_epochs):
+            optimizer.zero_grad()
+            
+            # Forward pass
+            embeddings = self.surrogate_model(modified_fine_tune_data)
+            outputs = self.classifier(embeddings)
+            
+            # Compute loss
+            loss = criterion(outputs, modified_fine_tune_data.y.long())
+            
+            # Backward pass
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(
+                list(self.surrogate_model.parameters()) + list(self.classifier.parameters()),
+                max_norm=1.0
+            )
+            optimizer.step()
+            
+            # Logging
+            if epoch % 10 == 0:
+                with torch.no_grad():
+                    acc = (outputs.argmax(dim=1) == modified_fine_tune_data.y).float().mean().item()
+                    print(f'Fine-tune epoch {epoch:03d}, loss: {loss.item():.4f}, acc: {acc:.4f}')
+        
+        # Unfreeze all parameters after fine-tuning
+        for param in self.surrogate_model.parameters():
+            param.requires_grad = True
+        for param in self.classifier.parameters():
+            param.requires_grad = True
+        
+        # Evaluate fine-tuned model
+        final_val_acc = self._evaluate_surrogate(modified_val_data)
+        final_test_acc = self._evaluate_surrogate(modified_test_data)
+        
+        results = {
+            'final_val_acc': final_val_acc,
+            'final_test_acc': final_test_acc,
+            'fine_tune_epochs': num_epochs,
+            'fine_tune_lr': lr,
+            'freeze_backbone': freeze_backbone,
+            'train_losses': [],  
+            'train_accs': [],   
+            'val_accs': [final_val_acc],
+            'test_accs': [final_test_acc]
+        }
+        
+        print(f"Fine-tuning completed - Val Acc: {final_val_acc:.4f}, Test Acc: {final_test_acc:.4f}")
+        
+        return results
+
+
+class DistributionShiftTrainer(SurrogateModelTrainer):
+    """
+    Specialized trainer for distribution shift attacks.
+    Extends SurrogateModelTrainer with adversarial distribution alignment.
+    """
+    
+    def __init__(self, 
+                 target_model: nn.Module,
+                 surrogate_architecture: str = 'gat',
+                 recovery_from: str = 'embedding',
+                 structure: str = 'original',
+                 device: str = 'cuda',
+                 shift_intensity: float = 0.3,
+                 **kwargs):
+        """
+        Initialize distribution shift trainer.
+        
+        Args:
+            target_model: Target model to steal
+            surrogate_architecture: Architecture for surrogate
+            recovery_from: What to recover from target
+            structure: Graph structure to use
+            device: Device to run on
+            shift_intensity: Intensity of distribution shift
+            **kwargs: Additional arguments for base trainer
+        """
+        super().__init__(
+            target_model=target_model,
+            surrogate_architecture=surrogate_architecture,
+            recovery_from=recovery_from,
+            structure=structure,
+            device=device,
+            **kwargs
+        )
+        self.shift_intensity = shift_intensity
+        self.use_distribution_shift = True
+        
+    def _create_surrogate_model(self, in_feats: int, out_feats: int, target_output_dim: int) -> Tuple[nn.Module, nn.Module]:
+        """
+        Create surrogate model with distribution shift capabilities.
+        Use the same logic as base class since we removed the advanced classes.
+        
+        Args:
+            in_feats: Input feature dimension
+            out_feats: Output class dimension
+            target_output_dim: Dimension of target model output to match
+            
+        Returns:
+            Tuple of (surrogate_model, classifier)
+        """
+        # Use the base class implementation since we cleaned up advanced_models
+        return super()._create_surrogate_model(in_feats, out_feats, target_output_dim)
+    
+    def train_surrogate(self, 
+                       query_data: Data,
+                       val_data: Data,
+                       test_data: Data,
+                       num_epochs: int = 200,
+                       lr: float = 0.001,
+                       **kwargs) -> Dict[str, Any]:
+        """
+        Train surrogate with distribution shift using a simplified approach.
+        Since we removed the advanced components, we'll use the base trainer with data modification.
+        
+        Args:
+            query_data: Data to query target with (already shifted)
+            val_data: Validation data
+            test_data: Test data
+            num_epochs: Number of training epochs
+            lr: Learning rate
+            **kwargs: Additional arguments
+            
+        Returns:
+            Training results
+        """
+        print(f"Training distribution shift surrogate with shift intensity: {self.shift_intensity}")
+        
+        # Apply structure modification
+        modified_query_data = self._apply_structure_modification(query_data)
+        modified_val_data = self._apply_structure_modification(val_data)
+        modified_test_data = self._apply_structure_modification(test_data)
+        
+        # Use the base class training with the shifted data
+        results = super().train_surrogate(
+            modified_query_data, modified_val_data, modified_test_data,
+            num_epochs=num_epochs, lr=lr, **kwargs
+        )
+        
+        # Add distribution shift information
+        results['shift_intensity'] = self.shift_intensity
+        results['attack_type'] = 'distribution_shift'
+        
+        return results
+
 
 class ModelStealingAttack:
     """
@@ -691,9 +892,11 @@ class ModelStealingAttack:
                          dataset_name: str = 'unknown',
                          num_epochs: int = 100,
                          lr: float = 0.001,
-                         **kwargs) -> Tuple[SurrogateModelTrainer, Dict[str, Any]]:
+                         experiment_id: int = 0,
+                         **kwargs) -> Tuple['SurrogateModelTrainer', Dict[str, Any]]:
         """
-        Perform double extraction attack (train surrogate, then train another surrogate on first).
+        Perform double extraction attack.
+        Two-stage process: train surrogate_1 on target, then train surrogate_2 on surrogate_1.
         
         Args:
             query_data: Data to query target with
@@ -701,43 +904,42 @@ class ModelStealingAttack:
             test_data: Test data
             surrogate_architecture: Surrogate architecture
             recovery_from: What to recover
-            structure: Graph structure to use ('original', 'idgl', 'knn', 'random')
-            dataset_name: Name of dataset (affects IDGL thresholding)
+            structure: Graph structure to use
+            dataset_name: Name of dataset
             num_epochs: Number of training epochs
             lr: Learning rate
+            experiment_id: Random seed for reproducible splitting
             **kwargs: Additional arguments
             
         Returns:
             Tuple of (final_trainer, results)
         """
-        # Split query data in half with proper edge handling
+        print("=== Double Extraction Attack ===")
+        
+        # Split query data into two halves with proper randomization
+        torch.manual_seed(experiment_id)
+        np.random.seed(experiment_id)
+        random.seed(experiment_id)
+        
         num_nodes = query_data.x.shape[0]
+        node_indices = torch.randperm(num_nodes)  # Random permutation for fair splitting
         split_idx = num_nodes // 2
         
-        # Create node indices for each subset
-        nodes_1 = torch.arange(split_idx)
-        nodes_2 = torch.arange(split_idx, num_nodes)
+        # Ensure we have meaningful splits
+        if split_idx < 10:  # Minimum nodes per split
+            split_idx = max(1, num_nodes // 3)
         
-        # Extract subgraphs properly
-        edge_index_1, _ = subgraph(nodes_1, query_data.edge_index, relabel_nodes=True)
-        edge_index_2, _ = subgraph(nodes_2, query_data.edge_index, relabel_nodes=True)
+        indices_1 = node_indices[:split_idx]
+        indices_2 = node_indices[split_idx:]
         
-        # Create first subset
-        query_data_1 = Data(
-            x=query_data.x[:split_idx],
-            edge_index=edge_index_1,
-            y=query_data.y[:split_idx]
-        ).to(self.device)
+        print(f"Splitting {num_nodes} nodes: subset1={len(indices_1)}, subset2={len(indices_2)}")
         
-        # Create second subset  
-        query_data_2 = Data(
-            x=query_data.x[split_idx:],
-            edge_index=edge_index_2,
-            y=query_data.y[split_idx:]
-        ).to(self.device)
+        # Create proper subgraphs with edge preservation
+        query_data_1 = self._create_subgraph(query_data, indices_1)
+        query_data_2 = self._create_subgraph(query_data, indices_2)
         
-        # First extraction
-        print("=== First Extraction ===")
+        # === FIRST EXTRACTION ===
+        print("=== First Extraction (Target -> Surrogate_1) ===")
         trainer_1 = SurrogateModelTrainer(
             target_model=self.target_model,
             surrogate_architecture=surrogate_architecture,
@@ -751,22 +953,24 @@ class ModelStealingAttack:
         results_1 = trainer_1.train_surrogate(query_data_1, val_data, test_data, 
                                               num_epochs=num_epochs, lr=lr)
         
-        # Second extraction using first surrogate as target
-        print("=== Second Extraction ===")
+        # === SECOND EXTRACTION ===
+        print("=== Second Extraction (Surrogate_1 -> Surrogate_2) ===")
         
         # Create wrapper for first surrogate to match target model interface
-        class SurrogateWrapper(nn.Module):
+        class SurrogateAsTarget(nn.Module):
             def __init__(self, surrogate_model, classifier):
                 super().__init__()
                 self.surrogate_model = surrogate_model
                 self.classifier = classifier
+                self.eval()  # Always in eval mode when used as target
                 
             def forward(self, data):
-                embeddings = self.surrogate_model(data)
-                predictions = self.classifier(embeddings)
+                with torch.no_grad():  # No gradients when querying
+                    embeddings = self.surrogate_model(data)
+                    predictions = self.classifier(embeddings)
                 return embeddings, predictions
         
-        surrogate_as_target = SurrogateWrapper(trainer_1.surrogate_model, trainer_1.classifier)
+        surrogate_as_target = SurrogateAsTarget(trainer_1.surrogate_model, trainer_1.classifier)
         
         trainer_2 = SurrogateModelTrainer(
             target_model=surrogate_as_target,
@@ -781,22 +985,265 @@ class ModelStealingAttack:
         results_2 = trainer_2.train_surrogate(query_data_2, val_data, test_data, 
                                              num_epochs=num_epochs, lr=lr)
         
+        # Evaluate final fidelity against original target (not surrogate_1)
+        final_fidelity = self._compute_double_extraction_fidelity(trainer_2, test_data)
+        
         # Combine results
         combined_results = {
             'first_extraction': results_1,
             'second_extraction': results_2,
             'final_val_acc': results_2['final_val_acc'],
-            'final_test_acc': results_2['final_test_acc']
+            'final_test_acc': results_2['final_test_acc'],
+            'final_fidelity': final_fidelity,
+            'attack_type': 'double_extraction',
+            # Add required fields for compatibility with train_stealing_surrogate_advance.py
+            'train_losses': results_1.get('train_losses', []) + results_2.get('train_losses', []),
+            'train_accs': results_1.get('train_accs', []) + results_2.get('train_accs', []),
+            'val_accs': results_1.get('val_accs', []) + results_2.get('val_accs', []),
+            'test_accs': results_1.get('test_accs', []) + results_2.get('test_accs', [])
         }
         
         return trainer_2, combined_results
-    
+
+    def distribution_shift(self,
+                          query_data: Data,
+                          val_data: Data,
+                          test_data: Data,
+                          surrogate_architecture: str = 'gat',
+                          recovery_from: str = 'embedding',
+                          structure: str = 'original',
+                          dataset_name: str = 'unknown',
+                          num_epochs: int = 100,
+                          lr: float = 0.001,
+                          shift_intensity: float = 0.3,
+                          **kwargs) -> Tuple['SurrogateModelTrainer', Dict[str, Any]]:
+        """
+        Perform distribution shift attack.
+        Modifies the training distribution to hide fingerprint patterns.
+        
+        Args:
+            query_data: Data to query target with
+            val_data: Validation data
+            test_data: Test data
+            surrogate_architecture: Surrogate architecture
+            recovery_from: What to recover
+            structure: Graph structure to use
+            dataset_name: Name of dataset
+            num_epochs: Number of training epochs
+            lr: Learning rate
+            shift_intensity: How much to shift the distribution (0.0-1.0)
+            **kwargs: Additional arguments
+            
+        Returns:
+            Tuple of (trainer, results)
+        """
+        print("=== Distribution Shift Attack ===")
+        
+        # Apply distribution shift to query data
+        shifted_query_data = self._apply_distribution_shift(query_data, shift_intensity)
+        
+        # Create specialized trainer for distribution shift
+        trainer = DistributionShiftTrainer(
+            target_model=self.target_model,
+            surrogate_architecture=surrogate_architecture,
+            recovery_from=recovery_from,
+            structure=structure,
+            dataset_name=dataset_name,
+            device=self.device,
+            shift_intensity=shift_intensity,
+            **kwargs
+        )
+        
+        results = trainer.train_surrogate(shifted_query_data, val_data, test_data,
+                                        num_epochs=num_epochs, lr=lr)
+        
+        results['attack_type'] = 'distribution_shift'
+        results['shift_intensity'] = shift_intensity
+        
+        return trainer, results
+
+    def fine_tuning(self,
+                   query_data: Data,
+                   val_data: Data,
+                   test_data: Data,
+                   surrogate_architecture: str = 'gat',
+                   recovery_from: str = 'embedding',
+                   structure: str = 'original',
+                   dataset_name: str = 'unknown',
+                   num_epochs: int = 100,
+                   lr: float = 0.001,
+                   experiment_id: int = 0,
+                   fine_tune_ratio: float = 0.5,
+                   fine_tune_lr_factor: float = 0.1,
+                   **kwargs) -> Tuple['SurrogateModelTrainer', Dict[str, Any]]:
+        """
+        Perform fine tuning attack .
+        Two-stage process: extract surrogate, then fine-tune on additional data.
+        
+        Args:
+            query_data: Data to query target with
+            val_data: Validation data
+            test_data: Test data
+            surrogate_architecture: Surrogate architecture
+            recovery_from: What to recover
+            structure: Graph structure to use
+            dataset_name: Name of dataset
+            num_epochs: Number of training epochs
+            lr: Learning rate
+            experiment_id: Random seed for reproducible splitting
+            fine_tune_ratio: Fraction of data to use for fine-tuning
+            fine_tune_lr_factor: Learning rate reduction factor for fine-tuning
+            **kwargs: Additional arguments
+            
+        Returns:
+            Tuple of (trainer, results)
+        """
+        print("=== Fine Tuning Attack ===")
+        
+        # Split data for initial training and fine-tuning
+        torch.manual_seed(experiment_id)
+        np.random.seed(experiment_id)
+        random.seed(experiment_id)
+        
+        num_nodes = query_data.x.shape[0]
+        node_indices = torch.randperm(num_nodes)
+        split_idx = int(num_nodes * (1 - fine_tune_ratio))
+        
+        initial_indices = node_indices[:split_idx]
+        finetune_indices = node_indices[split_idx:]
+        
+        print(f"Splitting {num_nodes} nodes: initial={len(initial_indices)}, fine-tune={len(finetune_indices)}")
+        
+        initial_data = self._create_subgraph(query_data, initial_indices)
+        finetune_data = self._create_subgraph(query_data, finetune_indices)
+        
+        # === INITIAL EXTRACTION ===
+        print("=== Initial Extraction Phase ===")
+        trainer = SurrogateModelTrainer(
+            target_model=self.target_model,
+            surrogate_architecture=surrogate_architecture,
+            recovery_from=recovery_from,
+            structure=structure,
+            dataset_name=dataset_name,
+            device=self.device,
+            **kwargs
+        )
+        
+        initial_results = trainer.train_surrogate(initial_data, val_data, test_data,
+                                                 num_epochs=num_epochs, lr=lr)
+        
+        # === FINE-TUNING PHASE ===
+        print("=== Fine-Tuning Phase ===")
+        fine_tune_results = trainer.fine_tune_surrogate(
+            finetune_data, val_data, test_data,
+            num_epochs=num_epochs // 2,  # Fewer epochs for fine-tuning
+            lr=lr * fine_tune_lr_factor   # Reduced learning rate
+        )
+        
+        # Combine results
+        combined_results = {
+            'initial_extraction': initial_results,
+            'fine_tuning': fine_tune_results,
+            'final_val_acc': fine_tune_results['final_val_acc'],
+            'final_test_acc': fine_tune_results['final_test_acc'],
+            'attack_type': 'fine_tuning',
+            'fine_tune_ratio': fine_tune_ratio,
+            'fine_tune_lr_factor': fine_tune_lr_factor,
+            'train_losses': initial_results.get('train_losses', []) + fine_tune_results.get('train_losses', []),
+            'train_accs': initial_results.get('train_accs', []) + fine_tune_results.get('train_accs', []),
+            'val_accs': initial_results.get('val_accs', []) + fine_tune_results.get('val_accs', []),
+            'test_accs': initial_results.get('test_accs', []) + fine_tune_results.get('test_accs', [])
+        }
+        
+        return trainer, combined_results
+
+    def _create_subgraph(self, data: Data, node_indices: torch.Tensor) -> Data:
+        """
+        Create a proper subgraph from node indices, preserving edge structure.
+        """
+        # Sort indices for consistent subgraph creation
+        node_indices = torch.sort(node_indices)[0]
+        
+        # Ensure node_indices are on the same device as the data
+        node_indices = node_indices.to(data.x.device)
+        
+        # Extract subgraph edges
+        edge_index, edge_attr = subgraph(
+            node_indices, 
+            data.edge_index, 
+            edge_attr=getattr(data, 'edge_attr', None),
+            relabel_nodes=True,
+            num_nodes=data.x.shape[0]
+        )
+        
+        # Create subgraph data
+        subgraph_data = Data(
+            x=data.x[node_indices],
+            edge_index=edge_index,
+            edge_attr=edge_attr,
+            y=data.y[node_indices] if data.y is not None else None
+        )
+        
+        return subgraph_data.to(self.device)
+
+    def _apply_distribution_shift(self, data: Data, shift_intensity: float) -> Data:
+        """
+        Apply distribution shift to the data to hide fingerprint patterns.
+        """
+        shifted_data = data.clone()
+        
+        # Apply feature noise
+        noise = torch.randn_like(data.x) * shift_intensity * 0.1
+        shifted_data.x = data.x + noise
+        
+        # Apply label noise
+        if data.y is not None and shift_intensity > 0:
+            num_flip = int(len(data.y) * shift_intensity * 0.1)
+            if num_flip > 0:
+                flip_indices = torch.randperm(len(data.y))[:num_flip]
+                unique_labels = torch.unique(data.y)
+                for idx in flip_indices:
+                    # Randomly assign different label
+                    new_label = unique_labels[torch.randint(0, len(unique_labels), (1,))]
+                    while new_label == data.y[idx]:
+                        new_label = unique_labels[torch.randint(0, len(unique_labels), (1,))]
+                    shifted_data.y[idx] = new_label
+        
+        return shifted_data
+
+    def _compute_double_extraction_fidelity(self, trainer: 'SurrogateModelTrainer', test_data: Data) -> float:
+        """
+        Compute fidelity between final surrogate and original target model.
+        """
+        try:
+            # Get original target predictions
+            self.target_model.eval()
+            with torch.no_grad():
+                target_embs, target_preds = self.target_model(test_data.to(self.device))
+            
+            # Get final surrogate predictions
+            trainer.surrogate_model.eval()
+            trainer.classifier.eval()
+            with torch.no_grad():
+                surrogate_embs = trainer.surrogate_model(test_data.to(self.device))
+                surrogate_preds = trainer.classifier(surrogate_embs)
+            
+            # Compute fidelity 
+            target_classes = target_preds.argmax(dim=1)
+            surrogate_classes = surrogate_preds.argmax(dim=1)
+            fidelity = (target_classes == surrogate_classes).float().mean().item()
+            
+            return fidelity
+            
+        except Exception as e:
+            print(f"⚠️  Fidelity computation failed: {e}")
+            return 0.0
+
     def evaluate_attack_success(self, 
                                trainer: SurrogateModelTrainer,
                                test_data: Data) -> Dict[str, float]:
         """
         Evaluate the success of the model stealing attack.
-        Following oldgrove: both models evaluated on original test structure.
         
         Args:
             trainer: Trained surrogate model trainer
@@ -807,12 +1254,12 @@ class ModelStealingAttack:
         """
         try:
             # Get target model performance on original structure
-            trainer.target_model.eval()
+            self.target_model.eval()
             with torch.no_grad():
-                target_embs, target_preds = trainer.target_model(test_data.to(trainer.device))
-                target_acc = (target_preds.argmax(dim=1) == test_data.y.to(trainer.device)).float().mean().item()
+                target_embs, target_preds = self.target_model(test_data.to(self.device))
+                target_acc = (target_preds.argmax(dim=1) == test_data.y.to(self.device)).float().mean().item()
             
-            # Get surrogate model performance on original structure (for fair comparison)
+            # Get surrogate model performance on original structure 
             surrogate_acc = trainer._evaluate_surrogate_on_original(test_data)
             
             # Compute fidelity on original structure
