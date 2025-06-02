@@ -24,7 +24,7 @@ echo "================================================"
 echo "ADVANCED ATTACK: Fine-tuning"
 echo "================================================"
 
-python3 /app/scripts/train_stealing_surrogate_advance.py \
+python3 /app/scripts/train_stealing_surrogate.py \
     --target-model-path "$TARGET_MODEL_PATH" \
     --model ${model} \
     --dataset ${dataset} \
@@ -57,7 +57,7 @@ echo "================================================"
 echo "ADVANCED ATTACK: Double extraction"
 echo "================================================"
 
-python3 /app/scripts/train_stealing_surrogate_advance.py \
+python3 /app/scripts/train_stealing_surrogate.py \
     --target-model-path "$TARGET_MODEL_PATH" \
     --model ${model} \
     --dataset ${dataset} \
@@ -90,7 +90,7 @@ echo "================================================"
 echo "ADVANCED ATTACK: Distribution shift"
 echo "================================================"
 
-python3 /app/scripts/train_stealing_surrogate_advance.py \
+python3 /app/scripts/train_stealing_surrogate.py \
     --target-model-path "$TARGET_MODEL_PATH" \
     --model ${model} \
     --dataset ${dataset} \
@@ -121,7 +121,7 @@ echo "================================================"
 echo "ADVANCED ATTACK: Double extraction"
 echo "================================================"
 
-python3 /app/scripts/train_stealing_surrogate_advance.py \
+python3 /app/scripts/train_stealing_surrogate.py \
     --target-model-path "$TARGET_MODEL_PATH" \
     --model ${model} \
     --dataset ${dataset} \
@@ -152,7 +152,7 @@ check_command "Double extraction visualization"
 
 # Pruning ratio 0.3
 echo "Training with pruning ratio 0.3..."
-python3 /app/scripts/train_stealing_surrogate_advance.py \
+python3 /app/scripts/train_stealing_surrogate.py \
     --target-model-path "$TARGET_MODEL_PATH" \
     --model ${model} \
     --dataset ${dataset} \
