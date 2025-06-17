@@ -1,0 +1,3 @@
+timestamp,target_model,target_embedding,suspect_embedding,total_pairs,num_similar,similarity_percentage,mean_similarity_prob,threshold,decision,is_surrogate,source_file,experiment_type
+2025-06-17T12:09:25.688032,gat_citeseer_target,/app/embeddings/non-overlapped/gat_citeseer/gat_citeseer_target.pt,/app/embeddings/non-overlapped/gat_citeseer/gat_citeseer_surrogate_original.pt,423,423,1.0,0.9997386,0.5,surrogate,True,models_verification_results.csv,csim_verification
+2025-06-17T12:09:29.753015,gat_citeseer_target,/app/embeddings/non-overlapped/gat_citeseer/gat_citeseer_target.pt,/app/embeddings/non-overlapped/gat_citeseer/gat_citeseer_surrogate_idgl.pt,423,422,0.9976359338061466,0.9974249,0.5,surrogate,True,models_verification_results.csv,csim_verification
