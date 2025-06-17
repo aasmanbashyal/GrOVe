@@ -22,7 +22,7 @@ services:
 
     networks:
       - grove-network 
-    command: bash scripts/startup.sh # Command to run on start
+    command: bash scripts/run_all_experiments.sh # Command to run on start
 
 networks:
   grove-network:

@@ -66,7 +66,7 @@ echo "================================================"
 TARGET_EMBEDDING="/app/embeddings/${split_type}/${model}_${dataset}/${model}_${dataset}_target.pt"
 
 if [ -f "$TARGET_EMBEDDING" ]; then
-    echo "🔍 Training Csim verification system from saved embeddings..."
+    echo "DEBUG Training Csim verification system from saved embeddings..."
     
     # Train Csim using saved embeddings
     python3 /app/scripts/train_csim_from_embeddings.py \
@@ -78,10 +78,10 @@ if [ -f "$TARGET_EMBEDDING" ]; then
         --device ${device} \
         --use-grid-search
         
-    echo "✅ Csim training completed!"
+    echo "SUCCESS Csim training completed!"
     
     echo ""
-    echo "🔍 Testing ownership verification on different models..."
+    echo "DEBUG Testing ownership verification on different models..."
     
     TARGET_MODEL_NAME="${model}_${dataset}_target"
     
@@ -110,10 +110,10 @@ if [ -f "$TARGET_EMBEDDING" ]; then
     fi
     
     echo ""
-    echo "✅ Csim verification testing completed!"
+    echo "SUCCESS Csim verification testing completed!"
     echo "Results show whether each model is detected as surrogate or independent"
 else
-    echo "❌ Target embeddings not found at: $TARGET_EMBEDDING"
+    echo " Target embeddings not found at: $TARGET_EMBEDDING"
     echo "Skipping Csim training and verification..."
 fi
 

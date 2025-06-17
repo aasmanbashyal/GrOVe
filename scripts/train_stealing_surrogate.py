@@ -74,7 +74,7 @@ def load_target_model(model_path, model_name, device='cuda'):
     model = model.to(device)
     model.eval()
     
-    print(f"✅ Target model loaded successfully")
+    print(f"SUCCESS Target model loaded successfully")
     print(f"Model config: {model_config}")
     
     return model
@@ -153,7 +153,7 @@ def perform_advanced_attack(attack_type, target_model, query_data, validation_da
     Returns:
         Tuple of (trainer/model, results, attack_info)
     """
-    print(f"\n🚀 Performing {attack_type} attack...")
+    print(f"\n Performing {attack_type} attack...")
     
     if attack_type == 'distribution_shift':
         # Use the corrected distribution_shift method from ModelStealingAttack
@@ -296,7 +296,7 @@ def perform_advanced_attack(attack_type, target_model, query_data, validation_da
         
         # Evaluate original performance
         original_acc = trainer.evaluate_surrogate(test_data)
-        print(f"🔍 Original model accuracy: {original_acc:.4f}")
+        print(f"DEBUG Original model accuracy: {original_acc:.4f}")
         
         # Apply pruning using the corrected method
         pruner = ModelPruner(pruning_ratio=args.pruning_ratio)
@@ -310,7 +310,7 @@ def perform_advanced_attack(attack_type, target_model, query_data, validation_da
         actual_surrogate_ratio = pruner.verify_pruning_ratio(original_surrogate, pruned_surrogate)
         actual_classifier_ratio = pruner.verify_pruning_ratio(original_classifier, pruned_classifier)
         
-        print(f"🔍 Pruning Verification:")
+        print(f"DEBUG Pruning Verification:")
         print(f"  Requested pruning ratio: {args.pruning_ratio}")
         print(f"  Actual surrogate pruning ratio: {actual_surrogate_ratio:.3f}")
         print(f"  Actual classifier pruning ratio: {actual_classifier_ratio:.3f}")
@@ -323,7 +323,7 @@ def perform_advanced_attack(attack_type, target_model, query_data, validation_da
         pruned_acc = trainer.evaluate_surrogate(test_data)
         accuracy_drop = original_acc - pruned_acc
         
-        print(f"🔍 Performance Impact:")
+        print(f"DEBUG Performance Impact:")
         print(f"  Original accuracy: {original_acc:.4f}")
         print(f"  Pruned accuracy: {pruned_acc:.4f}")
         print(f"  Accuracy drop: {accuracy_drop:.4f} ({accuracy_drop/original_acc*100:.1f}%)")
@@ -397,7 +397,7 @@ def save_stolen_embeddings(trainer, validation_data, embeddings_dir, model_name,
     
     torch.save(embeddings_data, embed_save_path)
     
-    print(f"✅ Saved stolen surrogate embeddings to: {embed_save_path}")
+    print(f"SUCCESS Saved stolen surrogate embeddings to: {embed_save_path}")
 
 
 def main():
@@ -479,10 +479,10 @@ def main():
                 args.surrogate_architecture, args
             )
         else:
-            print(f"\n🎯 Initializing basic model stealing attack...")
+            print(f"\n Initializing basic model stealing attack...")
             attack = ModelStealingAttack(target_model, device=args.device)
             
-            print(f"\n🚀 Starting basic model stealing attack...")
+            print(f"\n Starting basic model stealing attack...")
             trainer, results = attack.simple_extraction(
                 query_data=query_data,
                 val_data=validation_data,
@@ -498,7 +498,7 @@ def main():
 
         
         # Comprehensive evaluation with detailed metrics
-        print(f"\n📊 Performing comprehensive evaluation...")
+        print(f"\n Performing comprehensive evaluation...")
         if args.save_detailed_metrics:
             # Use ModelEvaluator for detailed metrics
             evaluator = ModelEvaluator(device=args.device)
@@ -587,16 +587,16 @@ def main():
                     print(f"  {key}: {value}")
         
         print(f"="*60)
-        print(f"✅ Stolen models saved to: {output_path}")
-        print(f"✅ Stolen embeddings saved to: {args.embeddings_dir}")
+        print(f"SUCCESS Stolen models saved to: {output_path}")
+        print(f"SUCCESS Stolen embeddings saved to: {args.embeddings_dir}")
         if args.save_detailed_metrics:
-            print(f"✅ Detailed metrics saved to CSV")
+            print(f"SUCCESS Detailed metrics saved to CSV")
         print(f"="*60)
         
         return True
         
     except Exception as e:
-        print(f"❌ Error during model stealing attack: {e}")
+        print(f" Error during model stealing attack: {e}")
         import traceback
         traceback.print_exc()
         return False

@@ -14,7 +14,7 @@ TARGET_MODEL_PATH="/app/saved_models/${split_type}/${model}_${dataset}/${model}_
 
 # Check if target model exists
 if [ ! -f "$TARGET_MODEL_PATH" ]; then
-    echo "❌ Error: Target model not found at: $TARGET_MODEL_PATH"
+    echo " Error: Target model not found at: $TARGET_MODEL_PATH"
     echo "Please ensure the target model is trained first."
     exit 1
 fi

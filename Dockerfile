@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     curl \
     ca-certificates \
+    dos2unix \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Miniconda
@@ -37,12 +38,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the entire codebase
 COPY . .
 
-# Make startup script executable
-RUN chmod +x /app/scripts/startup.sh
+# Make startup script executable (handle both Unix and Windows line endings)
+RUN dos2unix /app/scripts/run_all_experiments.sh 2>/dev/null || true && \
+    chmod +x /app/scripts/run_all_experiments.sh
 
 # Set environment variables
 ENV PYTHONPATH="/app:${PYTHONPATH}"
 ENV CUDA_VISIBLE_DEVICES=0
 
 # Command to run when container starts
-CMD ["/app/scripts/startup.sh"] 
+CMD ["/app/scripts/run_all_experiments.sh"] 

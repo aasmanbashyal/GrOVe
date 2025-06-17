@@ -53,7 +53,7 @@ for dataset in "${dataset_list[@]}"; do
 
         # Check if target model exists
         if [ -f "$TARGET_MODEL_PATH" ]; then
-            echo "✅ Target model found, proceeding with model stealing attacks..."
+            echo "SUCCESS Target model found, proceeding with model stealing attacks..."
             
             echo ""
             echo "================================================"
@@ -76,7 +76,7 @@ for dataset in "${dataset_list[@]}"; do
                 --device ${device} \
                 --save-detailed-metrics
                 
-            echo "✅ Type I attack completed!"
+            echo "SUCCESS Type I attack completed!"
             echo "Results saved in: /app/saved_models/${split_type}/${model}_${dataset}"
             
             echo ""
@@ -101,11 +101,11 @@ for dataset in "${dataset_list[@]}"; do
                 --save-detailed-metrics
 
 
-            echo "✅ Type II (IDGL) attack completed!"
+            echo "SUCCESS Type II (IDGL) attack completed!"
             echo "Results saved in: /app/saved_models/${split_type}/${model}_${dataset}"
 
         else
-            echo "❌ Target model not found at: $TARGET_MODEL_PATH"
+            echo " Target model not found at: $TARGET_MODEL_PATH"
             echo "Skipping model stealing attacks..."
         fi
 
@@ -126,7 +126,7 @@ for dataset in "${dataset_list[@]}"; do
     done
 done
 
-echo "✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅"
+echo "SUCCESSSUCCESSSUCCESSSUCCESSSUCCESSSUCCESSSUCCESSSUCCESSSUCCESSSUCCESSSUCCESSSUCCESSSUCCESSSUCCESSSUCCESSSUCCESSSUCCESSSUCCESS"
 echo "🎉 All datasets and models processed successfully!"
 
 

@@ -198,6 +198,16 @@ class ModelEvaluator:
         Returns:
             Dictionary with embedding similarity metrics
         """
+        # Check dimension compatibility
+        if target_embs.shape[1] != surrogate_embs.shape[1]:
+            print(f"WARNING: Embedding dimension mismatch: target {target_embs.shape[1]}, surrogate {surrogate_embs.shape[1]}")
+            return {
+                'embedding_cosine_similarity': 0.0,
+                'embedding_l2_distance': float('inf'),
+                'embedding_l1_distance': float('inf'),
+                'embedding_correlation': 0.0
+            }
+        
         if target_embs.requires_grad:
             target_embs = target_embs.detach()
         if surrogate_embs.requires_grad:
@@ -270,11 +280,19 @@ class ModelEvaluator:
             target_classes = target_preds.argmax(dim=1)
             target_probs = F.softmax(target_preds, dim=1)
             
-            # Get surrogate model outputs
-            surrogate_embs = surrogate_trainer.surrogate_model(test_data)
-            surrogate_logits = surrogate_trainer.classifier(surrogate_embs)
-            surrogate_classes = surrogate_logits.argmax(dim=1)
-            surrogate_probs = F.softmax(surrogate_logits, dim=1)
+            # Get surrogate model outputs using the dedicated method
+            try:
+                surrogate_embs = surrogate_trainer.get_surrogate_embeddings(test_data)
+                surrogate_logits = surrogate_trainer.get_surrogate_predictions(test_data)
+                surrogate_classes = surrogate_logits.argmax(dim=1)
+                surrogate_probs = F.softmax(surrogate_logits, dim=1)
+            except Exception as e:
+                print(f"WARNING: Error getting surrogate outputs: {e}")
+                # Fallback to direct model calls
+                surrogate_embs = surrogate_trainer.surrogate_model(test_data)
+                surrogate_logits = surrogate_trainer.classifier(surrogate_embs)
+                surrogate_classes = surrogate_logits.argmax(dim=1)
+                surrogate_probs = F.softmax(surrogate_logits, dim=1)
         
         # Ground truth labels
         true_labels = test_data.y
@@ -294,8 +312,28 @@ class ModelEvaluator:
         # 3. Fidelity metrics
         fidelity_metrics = self.compute_fidelity(target_preds, surrogate_logits, return_detailed=True)
         
-        # 4. Embedding similarity metrics
-        embedding_metrics = self.compute_embedding_similarity(target_embs, surrogate_embs)
+        # 4. Embedding similarity metrics (only if dimensions match)
+        embedding_metrics = {}
+        if target_embs.shape[1] == surrogate_embs.shape[1]:
+            embedding_metrics = self.compute_embedding_similarity(target_embs, surrogate_embs)
+        else:
+            print(f"WARNING: Skipping embedding similarity: dimension mismatch "
+                  f"(target: {target_embs.shape[1]}, surrogate: {surrogate_embs.shape[1]})")
+
+            
+            # Try to get more information about the surrogate model
+            if hasattr(surrogate_trainer.surrogate_model, 'get_embedding_dimension'):
+                expected_dim = surrogate_trainer.surrogate_model.get_embedding_dimension()
+                print(f"   - Expected surrogate embedding dim: {expected_dim}")
+                print(f"   - Actual surrogate embedding dim: {surrogate_embs.shape[1]}")
+            
+            # Add default values for embedding metrics
+            embedding_metrics = {
+                'embedding_cosine_similarity': 0.0,
+                'embedding_l2_distance': float('inf'),
+                'embedding_l1_distance': float('inf'),
+                'embedding_correlation': 0.0
+            }
         
         # 5. Additional attack-specific metrics
         accuracy_gap = abs(target_metrics['target_accuracy'] - surrogate_metrics['surrogate_accuracy'])
@@ -345,7 +383,7 @@ class ModelEvaluator:
         # Save to CSV
         results_df.to_csv(csv_path, index=False)
         
-        print(f"💾 Evaluation results saved to: {csv_path}")
+        print(f"SAVED: Evaluation results saved to: {csv_path}")
         
         return str(csv_path)
     

@@ -127,7 +127,7 @@ def main():
             args.embeddings_dir, args.model, args.dataset, args.split_type
         )
         
-        print(f"\n📁 Found embedding files:")
+        print(f"\n Found embedding files:")
         print(f"Target: {embedding_files['target']}")
         print(f"Surrogates: {len(embedding_files['surrogates'])} files")
         for i, path in enumerate(embedding_files['surrogates']):
@@ -142,7 +142,7 @@ def main():
         # Train Csim using saved embeddings
         target_model_name = f"{args.model}_{args.dataset}_target"
         
-        print(f"\n🎯 Training Csim for: {target_model_name}")
+        print(f"\n Training Csim for: {target_model_name}")
         csim = manager.train_csim_from_embeddings(
             target_model_name=target_model_name,
             target_embedding_path=embedding_files['target'],
@@ -152,14 +152,14 @@ def main():
             use_grid_search=args.use_grid_search
         )
         
-        print(f"\n✅ Csim training completed successfully!")
+        print(f"\nSUCCESS Csim training completed successfully!")
         
 
         print(f"\n" + "="*60)
         print(f"CSIM TRAINING SUMMARY")
         print(f"="*60)
-        print(f"✅ Successfully trained Csim for {target_model_name}")
-        print(f"📊 Training data:")
+        print(f"SUCCESS Successfully trained Csim for {target_model_name}")
+        print(f" Training data:")
         print(f"   - Target model: {args.model}")
         print(f"   - Dataset: {args.dataset}")
         print(f"   - Surrogate models: {len(embedding_files['surrogates'])}")
@@ -170,7 +170,7 @@ def main():
         return True
         
     except Exception as e:
-        print(f"❌ Error during Csim training: {e}")
+        print(f" Error during Csim training: {e}")
         import traceback
         traceback.print_exc()
         return False

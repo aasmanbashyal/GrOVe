@@ -201,9 +201,9 @@ def train_model(model_name, dataset_name, output_dir, embeddings_dir=None, devic
     elif model_role == 'surrogate':
         # This traditional surrogate training is kept for compatibility
         train_data = query_train
-        print("⚠️ Note: Using traditional surrogate training.")
+        print("WARNING Note: Using traditional surrogate training.")
     else:
-        raise ValueError(f"❌ Invalid model role: {model_role}")
+        raise ValueError(f" Invalid model role: {model_role}")
     
     # Create data loaders
     train_loader = DataLoader([train_data], batch_size=batch_size, shuffle=True)

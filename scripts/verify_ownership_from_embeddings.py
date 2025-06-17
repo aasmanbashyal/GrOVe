@@ -61,7 +61,7 @@ def main():
         manager = CsimManager(base_save_dir=args.csim_model_dir)
         
         # Verify ownership
-        print(f"\n🔍 Verifying ownership...")
+        print(f"\nDEBUG Verifying ownership...")
         results = manager.verify_from_embeddings(
             target_model_name=args.target_model_name,
             target_embedding_path=args.target_embedding,
@@ -99,9 +99,9 @@ def main():
                 if write_header:
                     writer.writeheader()
                 writer.writerow(row)
-            print(f"\n📝 Results appended to: {csv_file}")
+            print(f"\n Results appended to: {csv_file}")
         except Exception as e:
-            print(f"⚠️  Could not write results to CSV: {e}")
+            print(f"WARNING  Could not write results to CSV: {e}")
         # Display results
         print(f"\n" + "="*60)
         print(f"VERIFICATION RESULTS")
@@ -109,26 +109,26 @@ def main():
         print(f"Target Model: {args.target_model_name}")
         print(f"Suspect Model: {Path(args.suspect_embedding).name}")
         print(f"")
-        print(f"📊 Similarity Analysis:")
+        print(f" Similarity Analysis:")
         print(f"   Total embedding pairs: {results['total_pairs']}")
         print(f"   Similar pairs: {results['num_similar']}")
         print(f"   Similarity percentage: {results['similarity_percentage']:.1%}")
         print(f"   Mean similarity probability: {results['mean_similarity_prob']:.4f}")
         print(f"   Threshold used: {results['threshold']}")
         print(f"")
-        print(f"🎯 Final Decision: {results['decision'].upper()}")
+        print(f" Final Decision: {results['decision'].upper()}")
         if results['is_surrogate']:
-            print(f"   ⚠️  The suspect model is likely a SURROGATE of the target model")
+            print(f"   WARNING  The suspect model is likely a SURROGATE of the target model")
             print(f"   🔴 Potential intellectual property theft detected!")
         else:
-            print(f"   ✅ The suspect model appears to be INDEPENDENT")
+            print(f"   SUCCESS The suspect model appears to be INDEPENDENT")
             print(f"   🟢 No evidence of model stealing detected")
         print(f"="*60)
         
         return results['is_surrogate']
         
     except Exception as e:
-        print(f"❌ Error during verification: {e}")
+        print(f" Error during verification: {e}")
         import traceback
         traceback.print_exc()
         return False

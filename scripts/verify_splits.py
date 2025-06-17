@@ -93,9 +93,9 @@ def verify_splits(data_dir):
             print(f"Overlap between target and query: {len(overlap)} nodes")
             
             if len(overlap) == 0:
-                print("✅ Non-overlapped splits verified - no overlap between training sets")
+                print("SUCCESS Non-overlapped splits verified - no overlap between training sets")
             else:
-                print("❌ Warning: Overlap detected in supposedly non-overlapped splits")
+                print(" Warning: Overlap detected in supposedly non-overlapped splits")
         
         # Show percentages for all splits
         print(f"\nPercentage breakdown:")

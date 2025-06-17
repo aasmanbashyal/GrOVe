@@ -47,8 +47,13 @@ class SurrogateEmbeddingModel(nn.Module):
         self.base_model = base_model
         self.output_dim = output_dim
         
-        # Override the classifier to output embeddings of target dimension
-        self.base_model.classifier = nn.Linear(base_model.h_feats, output_dim)
+        # Create a dedicated embedding projection layer instead of overriding the classifier
+        # This ensures we always output the correct dimension regardless of the base model's classifier
+        self.embedding_projection = nn.Linear(base_model.h_feats, output_dim)
+        
+        # Initialize the projection layer properly
+        nn.init.xavier_uniform_(self.embedding_projection.weight)
+        nn.init.zeros_(self.embedding_projection.bias)
         
     def forward(self, data):
         """
@@ -60,10 +65,22 @@ class SurrogateEmbeddingModel(nn.Module):
         Returns:
             embeddings: Node embeddings matching target dimension
         """
+        # Get embeddings from base model (before classification)
         embeddings, _ = self.base_model(data)
-        # Use the modified classifier to get target-dimensional embeddings
-        target_embeddings = self.base_model.classifier(embeddings)
+        
+        # Project to target dimension using our dedicated projection layer
+        target_embeddings = self.embedding_projection(embeddings)
+        
         return target_embeddings
+    
+    def get_embedding_dimension(self):
+        """
+        Get the output embedding dimension.
+        
+        Returns:
+            Output embedding dimension
+        """
+        return self.output_dim
 
 class SurrogateModelTrainer:
     """
@@ -132,7 +149,7 @@ class SurrogateModelTrainer:
             return data.to(self.device)
         else:
             # Type II attack: reconstruct structure
-            print(f"🔄 Reconstructing graph structure using {self.structure} method...")
+            print(f"RECONSTRUCTION: Reconstructing graph structure using {self.structure} method...")
             
             # Prepare parameters for reconstruction
             reconstruction_kwargs = {}
@@ -173,7 +190,7 @@ class SurrogateModelTrainer:
                 return reconstructed_data.to(self.device)
                 
             except Exception as e:
-                print(f"⚠️  Graph reconstruction failed: {e}")
+                print(f"WARNING: Graph reconstruction failed: {e}")
                 print("Falling back to original structure...")
                 return data.to(self.device)
     
@@ -194,7 +211,7 @@ class SurrogateModelTrainer:
                 embeddings, predictions = self.target_model(data)
                 return predictions.to(self.device), embeddings.to(self.device)
             except Exception as e:
-                print(f"⚠️  Target model query failed: {e}")
+                print(f"WARNING  Target model query failed: {e}")
                 # Return dummy outputs with correct shapes
                 num_nodes = data.x.shape[0]
                 dummy_embeddings = torch.zeros(num_nodes, self.hidden_dim, device=self.device)
@@ -248,6 +265,7 @@ class SurrogateModelTrainer:
         # Create classifier for final predictions
         classifier = nn.Linear(target_output_dim, out_feats)
         
+
         return surrogate_model.to(self.device), classifier.to(self.device)
     
     def _apply_projection(self, embeddings: torch.Tensor, labels: torch.Tensor, transform_name: str = 'tsne') -> torch.Tensor:
@@ -291,7 +309,7 @@ class SurrogateModelTrainer:
         
         # Handle edge case where we have very few samples
         if len(X) < 10:
-            print("⚠️  Too few samples for detached classifier training")
+            print("WARNING  Too few samples for detached classifier training")
             # Create a dummy classifier
             clf = MLPClassifier(random_state=42, max_iter=10)
             # Fit on dummy data
@@ -326,7 +344,7 @@ class SurrogateModelTrainer:
             test_acc = clf.score(X_test, y_test)
             print(f"Detached classifier test accuracy: {test_acc:.4f}")
         except Exception as e:
-            print(f"⚠️  Detached classifier training failed: {e}")
+            print(f"WARNING  Detached classifier training failed: {e}")
         
         return clf
     
@@ -394,6 +412,14 @@ class SurrogateModelTrainer:
         self.surrogate_model, self.classifier = self._create_surrogate_model(
             in_feats, out_feats, target_output_dim
         )
+        
+        # Validate embedding dimensions before training
+        if not self.validate_embedding_dimensions(modified_query_data):
+            print(" Surrogate model embedding dimensions are incorrect!")
+            print("This will cause dimension mismatch during evaluation.")
+            print("Please check the model configuration.")
+        else:
+            print("SUCCESS Surrogate model embedding dimensions are correct!")
         
         # Setup optimizers
         surrogate_optimizer = optim.Adam(self.surrogate_model.parameters(), lr=lr)
@@ -463,7 +489,7 @@ class SurrogateModelTrainer:
                     print(f'Val Acc {val_acc:.4f} | Test Acc {test_acc:.4f}')
                     
             except Exception as e:
-                print(f"⚠️  Training error at epoch {epoch}: {e}")
+                print(f"WARNING  Training error at epoch {epoch}: {e}")
                 # Continue training with dummy values
                 results['train_losses'].append(float('inf'))
                 results['train_accs'].append(0.0)
@@ -475,7 +501,7 @@ class SurrogateModelTrainer:
                 final_embs = self.surrogate_model(modified_query_data)
             self.detached_classifier = self._train_detached_classifier(final_embs, modified_query_data.y)
         except Exception as e:
-            print(f"⚠️  Detached classifier training failed: {e}")
+            print(f"WARNING  Detached classifier training failed: {e}")
         
         # Final evaluation
         final_val_acc = self._evaluate_surrogate(modified_val_data)
@@ -526,7 +552,7 @@ class SurrogateModelTrainer:
                 accuracy = (predictions == data.y).float().mean().item()
             return accuracy
         except Exception as e:
-            print(f"⚠️  Evaluation failed: {e}")
+            print(f"WARNING  Evaluation failed: {e}")
             return 0.0
     
     def _evaluate_surrogate_on_original(self, data: Data) -> float:
@@ -555,7 +581,7 @@ class SurrogateModelTrainer:
                 accuracy = (predictions == data.y).float().mean().item()
             return accuracy
         except Exception as e:
-            print(f"⚠️  Evaluation on original structure failed: {e}")
+            print(f"WARNING  Evaluation on original structure failed: {e}")
             return 0.0
     
     def compute_fidelity(self, data: Data) -> float:
@@ -592,7 +618,7 @@ class SurrogateModelTrainer:
             
             return fidelity
         except Exception as e:
-            print(f"⚠️  Fidelity computation failed: {e}")
+            print(f"WARNING  Fidelity computation failed: {e}")
             return 0.0
     
     def save_models(self, save_path: str):
@@ -623,7 +649,7 @@ class SurrogateModelTrainer:
             
             print(f"Models saved to {save_path}")
         except Exception as e:
-            print(f"⚠️  Failed to save models: {e}")
+            print(f"WARNING  Failed to save models: {e}")
 
     def fine_tune_surrogate(self, 
                            fine_tune_data: Data,
@@ -725,6 +751,78 @@ class SurrogateModelTrainer:
         print(f"Fine-tuning completed - Val Acc: {final_val_acc:.4f}, Test Acc: {final_test_acc:.4f}")
         
         return results
+
+    def validate_embedding_dimensions(self, test_data: Data) -> bool:
+        """
+        Validate that surrogate model outputs embeddings of the correct dimension.
+        
+        Args:
+            test_data: Test data to validate on
+            
+        Returns:
+            True if dimensions are correct, False otherwise
+        """
+        if self.surrogate_model is None:
+            print(" Surrogate model is None")
+            return False
+            
+        try:
+            with torch.no_grad():
+                test_data = test_data.to(self.device)
+                surrogate_embs = self.surrogate_model(test_data)
+                expected_dim = self.surrogate_model.get_embedding_dimension()
+                actual_dim = surrogate_embs.shape[1]
+                
+                if expected_dim == actual_dim:
+                    print("SUCCESS Embedding dimensions match!")
+                    return True
+                else:
+                    print(f" Embedding dimension mismatch: expected {expected_dim}, got {actual_dim}")
+                    return False
+                    
+        except Exception as e:
+            print(f" Error during dimension validation: {e}")
+            return False
+
+    def get_surrogate_embeddings(self, data: Data) -> torch.Tensor:
+        """
+        Get embeddings from the surrogate model for evaluation.
+        
+        Args:
+            data: Input data
+            
+        Returns:
+            Embeddings from surrogate model
+        """
+        if self.surrogate_model is None:
+            raise ValueError("Surrogate model is not initialized")
+            
+        self.surrogate_model.eval()
+        with torch.no_grad():
+            data = data.to(self.device)
+            embeddings = self.surrogate_model(data)
+            return embeddings
+    
+    def get_surrogate_predictions(self, data: Data) -> torch.Tensor:
+        """
+        Get predictions from the surrogate model for evaluation.
+        
+        Args:
+            data: Input data
+            
+        Returns:
+            Predictions from surrogate model
+        """
+        if self.surrogate_model is None or self.classifier is None:
+            raise ValueError("Surrogate model or classifier is not initialized")
+            
+        self.surrogate_model.eval()
+        self.classifier.eval()
+        with torch.no_grad():
+            data = data.to(self.device)
+            embeddings = self.surrogate_model(data)
+            logits = self.classifier(embeddings)
+            return logits
 
 
 class DistributionShiftTrainer(SurrogateModelTrainer):
@@ -1236,7 +1334,7 @@ class ModelStealingAttack:
             return fidelity
             
         except Exception as e:
-            print(f"⚠️  Fidelity computation failed: {e}")
+            print(f"WARNING  Fidelity computation failed: {e}")
             return 0.0
 
     def evaluate_attack_success(self, 
@@ -1281,7 +1379,7 @@ class ModelStealingAttack:
             return results
             
         except Exception as e:
-            print(f"⚠️  Attack evaluation failed: {e}")
+            print(f"WARNING  Attack evaluation failed: {e}")
             return {
                 'target_accuracy': 0.0,
                 'surrogate_accuracy': 0.0,

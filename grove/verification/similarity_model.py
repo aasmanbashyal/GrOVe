@@ -450,7 +450,7 @@ class CsimManager:
         # Store in manager
         self.csim_models[target_model_name] = csim
         
-        print(f"✅ Csim training completed for {target_model_name}")
+        print(f"SUCCESS Csim training completed for {target_model_name}")
         print(f"Training results: {results}")
         
         return csim
