@@ -1,0 +1,5 @@
+# Install the CPU build of torch first using the command in README.md.
+-r requirements.txt
+torch==2.7.0
+torch-geometric==2.6.1
+pytest==8.4.2

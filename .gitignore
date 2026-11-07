@@ -11,3 +11,5 @@ old_visualizations*
 results.md
 installation.md
 codestructure.md
+.venv/
+.pytest_cache/
