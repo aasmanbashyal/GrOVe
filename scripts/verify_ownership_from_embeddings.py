@@ -131,9 +131,10 @@ def main():
         print(f" Error during verification: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        return None
 
 
 if __name__ == '__main__':
     is_surrogate = main()
-    sys.exit(1 if is_surrogate else 0) 
+    # Classification is a result, not an execution failure.
+    sys.exit(1 if is_surrogate is None else 0)

@@ -25,7 +25,45 @@ mkdir -p data/raw
 
 docker-compose up --build
 ```
-**What happens**: Automatically runs all experiments (6 datasets × 3 models × multiple attack types)s
+**What happens**: Runs preprocessing, target and independent training, basic and
+advanced attacks, CSim training/verification, comprehensive evaluation, and result
+organization. The default is a full run across 6 datasets and 3 target models.
+Missing raw datasets stop the run before training starts. Any failed command
+stops subsequent stages and returns a nonzero exit status.
+
+The runner resolves the repository root from its own location, so it also works
+when invoked outside the repository directory. It runs Python modules from that
+root, making the `grove` package available outside Docker.
+
+### Training validation and checkpoints
+
+Target, independent, and traditional surrogate training hold out 20% of their
+selected training graph for early stopping. The split uses a separate fixed
+validation seed, so target and independent runs sharing the same graph use the
+same partition despite different initialization seeds. `test.pt` is evaluated
+only after model selection; `validation.pt` or `verification.pt` remains the
+ownership-verification graph used to generate embeddings.
+
+Best-model weights are copied when validation improves and restored before
+final evaluation and embedding generation. Saved weights, final metrics, and
+saved verification embeddings therefore refer to the same selected checkpoint.
+`final_test_acc` reports the held-out test result separately from validation.
+Existing results should be regenerated to use this validation protocol.
+
+### Regression tests without datasets or a GPU
+
+```bash
+uv venv --python 3.12
+uv pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cpu
+uv pip install -r requirements-test.txt
+uv run --no-project python -m pytest tests -q
+```
+
+Training tests use tiny synthetic graphs. Pipeline tests execute Bash with stub
+Python commands to check phase order, missing inputs, and failure propagation;
+they do not run the full experiment suite. On Windows they use Git Bash when
+available. The ownership-verification CLI now returns exit code 0 for either
+successful classification and nonzero for execution errors.
 
 
 ---
@@ -71,7 +109,7 @@ docker-compose up --build
 ### **Phase 1: Basic Experimental Pipeline**
 1. **Data Preprocessing**: Load NPZ files → Create non-overlapped splits → PyTorch Geometric format
 2. **Target Training**: Train GAT/GIN/SAGE models using train split with seed 42
-3. **Independent Training**: Train baseline models for comparison with seed 789
+3. **Independent Training**: Train one independently initialized baseline per target architecture with seed 789
 4. **Basic Attacks**: 
    - Type I (original structure): Query target → Train surrogate on original graph
    - Type II (IDGL structure): Query target → Reconstruct graph → Train surrogate
@@ -141,12 +179,27 @@ docker-compose up --build
 
 ### **Custom Configuration**
 ```bash
-# Modify experiments in run_all_experiments.sh
-DATASETS=("citeseer" "acm")  # Select specific datasets
-MODELS=("gat" "gin")         # Select specific models  
-EPOCHS=100                   # Adjust training epochs
-DEVICE="cuda"                # Set device (cuda/cpu)
+# Native run using the installed Python environment
+DATASETS="citeseer acm" MODELS="gat gin" EPOCHS=100 DEVICE=cuda \
+    bash scripts/run_all_experiments.sh
+
+# Reuse prepared splits and trained target checkpoints, skipping phases 1-3
+DATASETS="citeseer" MODELS="gat" DEVICE=cpu \
+    bash scripts/run_all_experiments.sh evaluate
 ```
+
+Environment options are `DATASETS`, `MODELS`, `DEVICE`, `EPOCHS`, `SPLIT_TYPE`,
+`VALIDATION_FRACTION`, `VALIDATION_SEED`, and `PYTHON_BIN`. Lists are
+space-separated. Defaults are the six datasets above, `gat gin sage`, `cuda`,
+200, `non-overlapped`, 0.2, 42, and `python3`, respectively. `MODELS` controls
+the target/baseline models prepared by the full run. Comprehensive evaluation
+discovers saved target checkpoints and tests all three surrogate architectures.
+Use a clean model-output directory when limiting a new experiment's targets.
+
+The `evaluate` mode checks the processed data and each requested target
+checkpoint before running. It never silently skips a missing prerequisite.
+CSim training uses only actual independent embeddings; target embeddings are
+never substituted as independent negative examples.
 
 ### **Manual Evaluation**
 ```bash

@@ -67,14 +67,9 @@ def find_embedding_files(embeddings_dir, model_name, dataset_name, split_type='n
         independent_path = base_path / independent_pattern
         if independent_path.exists():
             independent_paths.append(str(independent_path))
-        else:
-            # Use target as placeholder for independent (this is just for demo)
-            print(f"Warning: Using target embedding as independent placeholder")
-            independent_paths.append(str(target_path))
-    
-        # Use target as placeholder for independent (this is just for demo)
-        print(f"Warning: Using target embedding as independent placeholder")
-        independent_paths.append(str(target_path))
+
+    if not independent_paths:
+        raise ValueError(f"No independent embeddings found in {base_path}")
     
     return {
         'target': str(target_path),
@@ -178,4 +173,4 @@ def main():
 
 if __name__ == '__main__':
     success = main()
-    sys.exit(0 if success else 1) 
+    sys.exit(0 if success else 1)
